@@ -1,36 +1,168 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Gravitate Agent
+
+A minimalist Next.js application with WorkOS AuthKit authentication, designed with a clean, ultra-thin aesthetic inspired by Steve Jobs' design philosophy.
+
+## Features
+
+- 🔐 **WorkOS AuthKit Integration** - Hosted sign-in with seamless authentication
+- 🎨 **Minimalist Design** - Clean, elegant UI with smooth animations
+- ⚡ **Next.js 15** - Built with the latest Next.js App Router
+- ☁️ **Cloudflare Workers** - Configured for Cloudflare Workers deployment
+- 🎯 **Type-Safe** - Full TypeScript support
+
+## Prerequisites
+
+- Node.js 18+ and pnpm (or npm/yarn)
+- A [WorkOS](https://workos.com) account
 
 ## Getting Started
 
-First, run the development server:
+### 1. Clone the Repository
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/userw111/gravitate-agent.git
+cd gravitate-agent
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Install Dependencies
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+pnpm install
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 3. Set Up WorkOS
+
+1. Create an account at [WorkOS Dashboard](https://dashboard.workos.com)
+2. Navigate to **Configuration** → **AuthKit** (or **User Management** → **Redirects**)
+3. Copy your **API Key** and **Client ID**
+4. **Important:** In **Redirect URIs**, add the exact callback URL:
+   - For local development: `http://localhost:3000/api/auth/callback`
+   - For production: `https://your-domain.com/api/auth/callback` (replace with your actual domain)
+   
+   ⚠️ **The redirect URI must match exactly** - including the protocol (`http://` or `https://`), domain, and path (`/api/auth/callback`). Make sure there are no trailing slashes.
+
+### 4. Configure Environment Variables
+
+Create a `.env.local` file in the root directory:
+
+```bash
+cp .env.example .env.local
+```
+
+Update the values in `.env.local`:
+
+```env
+WORKOS_API_KEY=sk_your_api_key_here
+WORKOS_CLIENT_ID=client_your_client_id_here
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NODE_ENV=development
+```
+
+### 5. Run the Development Server
+
+```bash
+pnpm dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+## Project Structure
+
+```
+gravitate-agent/
+├── src/
+│   ├── app/
+│   │   ├── api/
+│   │   │   └── auth/
+│   │   │       ├── sign-in/      # Initiates WorkOS sign-in
+│   │   │       ├── callback/     # Handles OAuth callback
+│   │   │       └── sign-out/      # Handles sign-out
+│   │   ├── dashboard/            # Protected dashboard page
+│   │   ├── page.tsx              # Sign-in page
+│   │   └── layout.tsx            # Root layout
+│   ├── components/
+│   │   ├── SignInButton.tsx      # Sign-in button component
+│   │   └── SignOutButton.tsx     # Sign-out button component
+│   └── lib/
+│       └── auth.ts               # Authentication utilities
+├── .env.example                  # Environment variables template
+└── README.md
+```
+
+## Authentication Flow
+
+1. User clicks "Sign In" on the homepage
+2. Redirects to WorkOS hosted sign-in page
+3. User authenticates via WorkOS
+4. WorkOS redirects back to `/api/auth/callback`
+5. Callback route validates the code and creates a session
+6. User is redirected to `/dashboard`
+
+## Deployment
+
+### Cloudflare Workers
+
+This project is configured for Cloudflare Workers deployment using OpenNext Cloudflare.
+
+**Deploy to Cloudflare Workers:**
+
+```bash
+pnpm deploy
+```
+
+This will:
+1. Build your Next.js application
+2. Deploy it to Cloudflare Workers using Wrangler
+
+**Configure Environment Variables:**
+
+Set your environment variables using Wrangler:
+
+```bash
+# Set secrets (for sensitive data)
+wrangler secret put WORKOS_API_KEY
+wrangler secret put WORKOS_CLIENT_ID
+
+# Set public environment variables
+wrangler secret put NEXT_PUBLIC_APP_URL
+```
+
+Or configure them in `wrangler.jsonc` under the `vars` section for non-sensitive variables:
+
+```jsonc
+{
+  "vars": {
+    "NEXT_PUBLIC_APP_URL": "https://your-domain.workers.dev"
+  }
+}
+```
+
+**Preview Locally:**
+
+```bash
+pnpm preview
+```
+
+This builds and runs your application locally using Wrangler's dev server.
+
+### Other Platforms
+
+For other platforms (Vercel, Netlify, etc.), you'll need to adjust the build configuration. The current setup is optimized for Cloudflare Workers.
+
+## Design Philosophy
+
+This application follows minimalist design principles:
+- **Simplicity** - Clean layouts with generous white space
+- **Typography** - Light, readable fonts with careful tracking
+- **Animations** - Subtle, fast transitions (150-300ms)
+- **Focus** - Essential features only, no distractions
 
 ## Learn More
 
-To learn more about Next.js, take a look at the following resources:
+- [WorkOS AuthKit Documentation](https://workos.com/docs/user-management/authkit/introduction)
+- [Next.js Documentation](https://nextjs.org/docs)
+- [OpenNext Cloudflare](https://opennext.js.org/cloudflare)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## License
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT

@@ -22,5 +22,106 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+input, button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+@keyframes blur-focus {
+  from {
+    opacity: 0;
+    filter: blur(20px);
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+@keyframes rotate-fade {
+  from {
+    opacity: 0;
+    transform: rotate(-5deg) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+@keyframes elastic-bounce {
+  0% {
+    opacity: 0;
+    transform: translateY(20px) scale(0.8);
+  }
+  50% {
+    transform: translateY(-5px) scale(1.05);
+  }
+  70% {
+    transform: translateY(2px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes fade-in-simple {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-blur-focus {
+  animation: blur-focus 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-rotate-fade {
+  animation: rotate-fade 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-elastic-bounce {
+  animation: elastic-bounce 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-fade-in-simple {
+  animation: fade-in-simple 0.2s ease-out forwards;
+}
+
+.delay-50 {
+  animation-delay: 0.05s;
+  opacity: 0;
+}
+
+.delay-100 {
+  animation-delay: 0.1s;
+  opacity: 0;
+}
+
+/* Cursor states */
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  cursor: pointer;
+}
+
+button:active {
+  cursor: grabbing;
+}
+
