@@ -27,8 +27,8 @@ export default async function ChatPage() {
     <SidebarProvider>
       <Sidebar>
         <SidebarHeader>
-          <div className="flex items-center justify-between px-2">
-            <span className="text-sm font-medium">Chat History</span>
+          <div className="flex items-center justify-between px-2 group-data-[collapsible=offcanvas]:justify-center group-data-[collapsible=offcanvas]:px-0">
+            <span className="text-sm font-medium group-data-[collapsible=offcanvas]:hidden">Chat History</span>
             <SidebarTrigger />
           </div>
         </SidebarHeader>

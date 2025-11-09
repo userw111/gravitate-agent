@@ -1,6 +1,11 @@
 export async function POST(request: Request) {
   try {
-    const { messages, model, thinkingEffort = "high" } = await request.json();
+    const body = await request.json() as {
+      messages: Array<{ role: string; content: string }>;
+      model?: string;
+      thinkingEffort?: "low" | "medium" | "high";
+    };
+    const { messages, model, thinkingEffort = "high" } = body;
     if (!Array.isArray(messages)) {
       return new Response(JSON.stringify({ error: "Invalid messages" }), {
         status: 400,
@@ -21,27 +26,28 @@ export async function POST(request: Request) {
       (request.headers.get("origin") ?? "") ||
       "http://localhost:3000";
 
-        // Check if model supports reasoning (GPT-5 or GPT-OSS-120B)
-        const supportsReasoning = model?.includes("gpt-5") || model?.includes("gpt-oss-120b");
-        
-        const openRouterRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-            "HTTP-Referer": referer,
-            "X-Title": "Gravitate Agent",
+    // Check if model supports reasoning (GPT-5 or GPT-OSS-120B)
+    const supportsReasoning = model?.includes("gpt-5") || model?.includes("gpt-oss-120b");
+    
+    const openRouterRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": referer,
+        "X-Title": "Gravitate Agent",
+      },
+      body: JSON.stringify({
+        model: model || "openrouter/auto",
+        messages,
+        stream: true,
+        ...(supportsReasoning && {
+          reasoning: {
+            effort: thinkingEffort,
           },
-          body: JSON.stringify({
-            model: model || "openrouter/auto",
-            messages,
-            ...(supportsReasoning && {
-              reasoning: {
-                effort: thinkingEffort,
-              },
-            }),
-          }),
-        });
+        }),
+      }),
+    });
 
     if (!openRouterRes.ok) {
       const t = await openRouterRes.text();
@@ -51,16 +57,112 @@ export async function POST(request: Request) {
       });
     }
 
-        const data = await openRouterRes.json();
-        const reply =
-          data?.choices?.[0]?.message?.content ??
-          "I couldn't generate a response right now. Please try again.";
-        const reasoning = data?.choices?.[0]?.message?.reasoning;
+    // Create a ReadableStream to forward the streaming response
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = openRouterRes.body?.getReader();
+        const decoder = new TextDecoder();
 
-        return new Response(JSON.stringify({ reply, reasoning }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
+        if (!reader) {
+          controller.close();
+          return;
+        }
+
+        let buffer = "";
+        let reasoningBuffer = "";
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              if (line.trim() === "") continue;
+              
+              // OpenRouter SSE format: "data: {...}"
+              if (line.startsWith("data: ")) {
+                const dataStr = line.slice(6);
+                if (dataStr === "[DONE]") {
+                  // Send final message with accumulated content
+                  controller.enqueue(
+                    new TextEncoder().encode(
+                      `data: ${JSON.stringify({ type: "done" })}\n\n`
+                    )
+                  );
+                  continue;
+                }
+
+                try {
+                  const data = JSON.parse(dataStr);
+                  const choice = data.choices?.[0];
+                  
+                  if (choice) {
+                    const delta = choice.delta;
+                    const finishReason = choice.finish_reason;
+
+                    // Handle reasoning tokens
+                    if (delta?.reasoning) {
+                      reasoningBuffer += delta.reasoning;
+                      controller.enqueue(
+                        new TextEncoder().encode(
+                          `data: ${JSON.stringify({ 
+                            type: "reasoning", 
+                            content: delta.reasoning 
+                          })}\n\n`
+                        )
+                      );
+                    }
+
+                    // Handle content tokens
+                    if (delta?.content) {
+                      controller.enqueue(
+                        new TextEncoder().encode(
+                          `data: ${JSON.stringify({ 
+                            type: "content", 
+                            content: delta.content 
+                          })}\n\n`
+                        )
+                      );
+                    }
+
+                    // Handle finish
+                    if (finishReason) {
+                      controller.enqueue(
+                        new TextEncoder().encode(
+                          `data: ${JSON.stringify({ 
+                            type: "done",
+                            reasoning: reasoningBuffer || undefined
+                          })}\n\n`
+                        )
+                      );
+                    }
+                  }
+                } catch (e) {
+                  // Skip invalid JSON lines
+                  console.error("Failed to parse SSE data:", e);
+                }
+              }
+            }
+          }
+        } catch (error) {
+          controller.error(error);
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
   } catch (err) {
     return new Response(JSON.stringify({ error: "Unexpected error" }), {
       status: 500,

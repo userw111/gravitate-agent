@@ -3,6 +3,7 @@
 import * as React from "react";
 import { ModelSelector } from "@/components/ModelSelector";
 import { ThinkingEffortSelector } from "@/components/ThinkingEffortSelector";
+import { OpenRouterBalance } from "@/components/OpenRouterBalance";
 import type { ThinkingEffort } from "@/components/ModelSelector";
 
 export default function ChatHeader({
@@ -30,17 +31,20 @@ export default function ChatHeader({
   }
 
   return (
-    <div className="flex items-center gap-4 border-b border-foreground/10 px-4 py-2">
-      <ModelSelector value={selectedModel} onValueChange={handleChange} />
-      {thinkingEffort && onThinkingEffortChange && (
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-foreground/60 whitespace-nowrap">Thinking Effort:</span>
-          <ThinkingEffortSelector
-            value={thinkingEffort}
-            onValueChange={onThinkingEffortChange}
-          />
-        </div>
-      )}
+    <div className="flex items-center justify-between gap-4 border-b border-foreground/10 px-4 py-2">
+      <div className="flex items-center gap-4">
+        <ModelSelector value={selectedModel} onValueChange={handleChange} />
+        {thinkingEffort && onThinkingEffortChange && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-foreground/60 whitespace-nowrap">Thinking Effort:</span>
+            <ThinkingEffortSelector
+              value={thinkingEffort}
+              onValueChange={onThinkingEffortChange}
+            />
+          </div>
+        )}
+      </div>
+      <OpenRouterBalance />
     </div>
   );
 }

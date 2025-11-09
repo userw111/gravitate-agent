@@ -1,6 +1,9 @@
 "use client";
 
 import * as React from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -123,6 +126,14 @@ export default function ChatClient({
     setIsLoading(true);
     const controller = new AbortController();
     abortRef.current = controller;
+
+    // Create a placeholder message for streaming
+    const assistantMessageId = nextMessages.length;
+    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+
+    let accumulatedContent = "";
+    let accumulatedReasoning = "";
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -130,27 +141,104 @@ export default function ChatClient({
         body: JSON.stringify({ messages: nextMessages, model, thinkingEffort }),
         signal: controller.signal,
       });
+
       if (!res.ok) {
         throw new Error(`Request failed: ${res.status}`);
       }
-      const data = (await res.json()) as { reply: string; reasoning?: string };
-      setMessages((prev) => [...prev, { role: "assistant", content: data.reply, reasoning: data.reasoning }]);
+
+      if (!res.body) {
+        throw new Error("No response body");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.trim() === "") continue;
+          if (!line.startsWith("data: ")) continue;
+
+          const dataStr = line.slice(6);
+          if (dataStr === "[DONE]") continue;
+
+          try {
+            const data = JSON.parse(dataStr);
+
+            if (data.type === "content") {
+              accumulatedContent += data.content || "";
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[assistantMessageId] = {
+                  role: "assistant",
+                  content: accumulatedContent,
+                  reasoning: accumulatedReasoning || undefined,
+                };
+                return updated;
+              });
+            } else if (data.type === "reasoning") {
+              accumulatedReasoning += data.content || "";
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[assistantMessageId] = {
+                  role: "assistant",
+                  content: accumulatedContent,
+                  reasoning: accumulatedReasoning || undefined,
+                };
+                return updated;
+              });
+            } else if (data.type === "done") {
+              // Final update with any remaining reasoning
+              if (data.reasoning) {
+                accumulatedReasoning = data.reasoning;
+              }
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[assistantMessageId] = {
+                  role: "assistant",
+                  content: accumulatedContent,
+                  reasoning: accumulatedReasoning || undefined,
+                };
+                return updated;
+              });
+            }
+          } catch (parseError) {
+            // Skip invalid JSON
+            console.error("Failed to parse SSE data:", parseError);
+          }
+        }
+      }
     } catch (err) {
       const aborted = (err as any)?.name === "AbortError";
       if (aborted) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: "Stopped." },
-        ]);
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[assistantMessageId] = {
+            role: "assistant",
+            content: accumulatedContent || "Stopped.",
+            reasoning: accumulatedReasoning || undefined,
+          };
+          return updated;
+        });
       } else {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content:
-            "Sorry, I ran into an error reaching the AI provider. Please try again.",
-        },
-      ]);
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[assistantMessageId] = {
+            role: "assistant",
+            content:
+              accumulatedContent ||
+              "Sorry, I ran into an error reaching the AI provider. Please try again.",
+            reasoning: accumulatedReasoning || undefined,
+          };
+          return updated;
+        });
       }
     } finally {
       setIsLoading(false);
@@ -287,12 +375,83 @@ export default function ChatClient({
                     : "bg-foreground text-background"
                 }`}
               >
-                {m.content}
+                {isAssistant ? (
+                  <div className="markdown-content">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeHighlight]}
+                      components={{
+                        code({ className, children, ...props }: any) {
+                          const match = /language-(\w+)/.exec(className || "");
+                          const isInline = !match;
+                          return isInline ? (
+                            <code className="inline-code" {...props}>
+                              {children}
+                            </code>
+                          ) : (
+                            <pre className="code-block">
+                              <code className={className} {...props}>
+                                {children}
+                              </code>
+                            </pre>
+                          );
+                        },
+                        pre({ children }: any) {
+                          return <>{children}</>;
+                        },
+                        p({ children }: any) {
+                          return <p className="mb-2 last:mb-0">{children}</p>;
+                        },
+                        h1({ children }: any) {
+                          return <h1 className="text-lg font-bold mb-2 mt-4 first:mt-0">{children}</h1>;
+                        },
+                        h2({ children }: any) {
+                          return <h2 className="text-base font-bold mb-2 mt-3 first:mt-0">{children}</h2>;
+                        },
+                        h3({ children }: any) {
+                          return <h3 className="text-sm font-bold mb-1 mt-2 first:mt-0">{children}</h3>;
+                        },
+                        ul({ children }: any) {
+                          return <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>;
+                        },
+                        ol({ children }: any) {
+                          return <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>;
+                        },
+                        li({ children }: any) {
+                          return <li className="ml-2">{children}</li>;
+                        },
+                        a({ href, children }: any) {
+                          return (
+                            <a href={href} className="underline underline-offset-2 hover:opacity-80" target="_blank" rel="noopener noreferrer">
+                              {children}
+                            </a>
+                          );
+                        },
+                        blockquote({ children }: any) {
+                          return <blockquote className="border-l-4 border-foreground/30 pl-4 my-2 italic text-foreground/80">{children}</blockquote>;
+                        },
+                        hr() {
+                          return <hr className="my-4 border-foreground/20" />;
+                        },
+                        strong({ children }: any) {
+                          return <strong className="font-semibold">{children}</strong>;
+                        },
+                        em({ children }: any) {
+                          return <em className="italic">{children}</em>;
+                        },
+                      }}
+                    >
+                      {m.content}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="whitespace-pre-wrap">{m.content}</div>
+                )}
               </div>
             </div>
           );
         })}
-        {isLoading && (
+        {isLoading && (!messages.length || !messages[messages.length - 1]?.content) && (
           <div className="flex justify-start">
             <div className="max-w-[85%] rounded-lg px-4 py-2.5 text-sm bg-foreground/5 text-foreground/80">
               Thinking…
