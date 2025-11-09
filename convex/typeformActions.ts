@@ -55,6 +55,148 @@ export const fetchTypeformForms = action({
   },
 });
 
+/**
+ * Fetch form details including questions/fields
+ */
+export const fetchTypeformFormDetails = action({
+  args: {
+    email: v.string(),
+    formId: v.string(),
+  },
+  handler: async (ctx: ActionCtx, args): Promise<{
+    id: string;
+    title: string;
+    fields: Array<{
+      id: string;
+      ref: string;
+      title: string;
+      type: string;
+    }>;
+  } | null> => {
+    // Get user's access token from config
+    const config: { accessToken?: string } | null = await ctx.runQuery(api.typeform.getConfigForEmail, {
+      email: args.email,
+    });
+
+    if (!config?.accessToken) {
+      throw new Error(`Access token not configured for user: ${args.email}. Please set your Typeform personal access token in settings.`);
+    }
+
+    // Fetch form details from Typeform API
+    const response: Response = await fetch(`https://api.typeform.com/forms/${args.formId}`, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${config.accessToken}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = `Typeform API error: ${response.status} ${response.statusText}`;
+      try {
+        const errorJson: { message?: string } = JSON.parse(errorText);
+        if (errorJson.message) {
+          errorMessage = `Typeform API error: ${errorJson.message}`;
+        }
+      } catch {
+        if (errorText) {
+          errorMessage = `Typeform API error: ${errorText}`;
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    const formData: {
+      id?: string;
+      title?: string;
+      fields?: Array<{
+        id?: string;
+        ref?: string;
+        title?: string;
+        type?: string;
+        properties?: {
+          description?: string;
+          fields?: Array<{
+            id?: string;
+            ref?: string;
+            title?: string;
+            type?: string;
+            properties?: {
+              description?: string;
+              fields?: Array<unknown>;
+            };
+          }>;
+        };
+      }>;
+    } = await response.json();
+
+    if (!formData.fields || !Array.isArray(formData.fields)) {
+      return null;
+    }
+
+    // Recursively extract all fields, including nested fields in groups
+    const extractFields = (fields: Array<{
+      id?: string;
+      ref?: string;
+      title?: string;
+      type?: string;
+      properties?: {
+        description?: string;
+        fields?: Array<unknown>;
+      };
+    }>): Array<{ id: string; ref: string; title: string; type: string }> => {
+      const result: Array<{ id: string; ref: string; title: string; type: string }> = [];
+      
+      for (const field of fields) {
+        // Skip if missing required fields
+        if (!field.id || !field.ref || !field.title) {
+          continue;
+        }
+        
+        // If it's a group type, extract nested fields
+        if (field.type === "group" || field.type === "inline_group") {
+          if (field.properties?.fields && Array.isArray(field.properties.fields)) {
+            // Recursively extract nested fields (cast to same type for recursion)
+            const nestedFields = extractFields(
+              field.properties.fields as Array<{
+                id?: string;
+                ref?: string;
+                title?: string;
+                type?: string;
+                properties?: {
+                  description?: string;
+                  fields?: Array<unknown>;
+                };
+              }>
+            );
+            result.push(...nestedFields);
+          }
+          // Don't include the group header itself as a question
+        } else {
+          // Regular field - include it
+          result.push({
+            id: field.id,
+            ref: field.ref,
+            title: field.title,
+            type: field.type || "unknown",
+          });
+        }
+      }
+      
+      return result;
+    };
+
+    const allFields = extractFields(formData.fields);
+
+    return {
+      id: formData.id || args.formId,
+      title: formData.title || "Untitled Form",
+      fields: allFields,
+    };
+  },
+});
+
 export const fetchTypeformResponses = action({
   args: {
     email: v.string(),
@@ -122,6 +264,17 @@ export const storeResponseInternal = internalMutation({
     formId: v.string(),
     responseId: v.string(),
     payload: v.any(),
+    questions: v.optional(v.array(v.object({
+      id: v.string(),
+      ref: v.string(),
+      title: v.string(),
+      type: v.string(),
+    }))),
+    qaPairs: v.optional(v.array(v.object({
+      question: v.string(),
+      answer: v.string(),
+      fieldRef: v.optional(v.string()),
+    }))),
   },
   handler: async (ctx, args): Promise<{ inserted: boolean; id: string }> => {
     // Check for duplicate by responseId
@@ -142,6 +295,8 @@ export const storeResponseInternal = internalMutation({
       responseId: args.responseId,
       payload: args.payload,
       syncedAt: Date.now(),
+      questions: args.questions,
+      qaPairs: args.qaPairs,
     });
     return { inserted: true, id };
   },
@@ -161,6 +316,29 @@ export const syncTypeformResponses = action({
     if (!config?.accessToken) {
       throw new Error(`Access token not configured for user: ${args.email}. Please set your Typeform personal access token in settings.`);
     }
+
+    // Fetch form details once to get questions
+    let formQuestions: Array<{ id: string; ref: string; title: string; type: string }> = [];
+    try {
+      const formDetails = await ctx.runAction(api.typeformActions.fetchTypeformFormDetails, {
+        email: args.email,
+        formId: args.formId,
+      });
+      if (formDetails?.fields) {
+        formQuestions = formDetails.fields;
+        console.log(`Fetched ${formQuestions.length} questions for form ${args.formId}`);
+      } else {
+        console.warn(`No fields found in form details for ${args.formId}`);
+      }
+    } catch (error) {
+      console.error(`Failed to fetch form details for ${args.formId}:`, error);
+    }
+
+    // Create a map of field ref -> field for quick lookup
+    const fieldMap = new Map<string, { id: string; ref: string; title: string; type: string }>();
+    formQuestions.forEach((field) => {
+      fieldMap.set(field.ref, field);
+    });
 
     let synced = 0;
     let skipped = 0;
@@ -224,19 +402,120 @@ export const syncTypeformResponses = action({
             responseId,
           });
           
+          // Create Q&A pairs from answers and questions
+          const responsePayload = item as { answers?: Array<{ field?: { id?: string; ref?: string }; text?: string }> };
+          const qaPairs = responsePayload.answers?.map((answer) => {
+            const ref = answer.field?.ref;
+            const field = ref ? fieldMap.get(ref) : null;
+            return {
+              question: field?.title || ref || "Unknown Question",
+              answer: answer.text || "",
+              fieldRef: ref,
+            };
+          }) || [];
+          
           if (!existingResponse) {
-            // Response doesn't exist, store it
+            // Response doesn't exist, store it with questions and Q&A pairs
             await ctx.runMutation(api.typeform.storeResponse, {
               email: args.email,
               formId: args.formId,
               responseId,
               payload: item,
+              questions: formQuestions.length > 0 ? formQuestions : undefined,
+              qaPairs: qaPairs.length > 0 ? qaPairs : undefined,
             });
+            
             synced++;
           } else {
-            // Duplicate found, skip it
-            skipped++;
+            // Response exists - always update with latest questions/qaPairs if we have them
+            // This ensures we get the correct questions (not group headers) and proper Q&A pairs
+            // Always update if we have form questions (even if empty arrays)
+            // This ensures we replace group headers with actual questions
+            if (formQuestions.length > 0) {
+              // Update existing response with questions and Q&A pairs
+              try {
+                await ctx.runMutation(api.typeform.updateResponseWithQuestions, {
+                  responseId,
+                  questions: formQuestions,
+                  qaPairs: qaPairs, // Always pass, even if empty array
+                });
+                synced++; // Count as synced since we updated it
+                console.log(`Updated response ${responseId} with ${formQuestions.length} questions and ${qaPairs.length} Q&A pairs`);
+              } catch (updateError) {
+                console.error(`Failed to update response ${responseId}:`, updateError);
+                skipped++;
+              }
+            } else {
+              // No form questions available, skip update
+              console.warn(`Skipping update for ${responseId} - no form questions available (formQuestions.length = ${formQuestions.length})`);
+              skipped++;
+            }
           }
+            
+            // Extract client info and create/update client
+            // Import extractClientInfo function logic inline
+            const clientPayload = item as { answers?: Array<{ text?: string }>; submitted_at?: string };
+            let businessEmail: string | null = null;
+            let businessName: string | null = null;
+            let firstName: string | null = null;
+            let lastName: string | null = null;
+            let targetRevenue: number | null = null;
+            
+            if (clientPayload.answers && Array.isArray(clientPayload.answers)) {
+              // Extract name (first answer)
+              if (clientPayload.answers[0]?.text) {
+                const nameParts = clientPayload.answers[0].text.trim().split(/\s+/);
+                if (nameParts.length >= 1) firstName = nameParts[0];
+                if (nameParts.length >= 2) lastName = nameParts.slice(1).join(" ");
+              }
+              
+              // Extract business name (second answer)
+              if (clientPayload.answers[1]?.text) {
+                businessName = clientPayload.answers[1].text.trim();
+              }
+              
+              // Extract email
+              for (const answer of clientPayload.answers) {
+                if (answer.text && answer.text.includes("@")) {
+                  const emailMatch = answer.text.match(/[\w.-]+@[\w.-]+\.\w+/);
+                  if (emailMatch) {
+                    businessEmail = emailMatch[0];
+                    break;
+                  }
+                }
+              }
+              
+              // Extract target revenue
+              for (const answer of clientPayload.answers) {
+                if (answer.text) {
+                  const cleaned = answer.text.replace(/,/g, "").trim();
+                  const num = parseInt(cleaned, 10);
+                  if (!isNaN(num) && num >= 10000 && num <= 10000000) {
+                    targetRevenue = num;
+                    break;
+                  }
+                }
+              }
+            }
+            
+            // Create/update client if we have business email
+            if (businessEmail && businessName) {
+              try {
+                await ctx.runMutation(api.clients.upsertClientFromTypeform, {
+                  ownerEmail: args.email,
+                  businessEmail: businessEmail.toLowerCase().trim(),
+                  businessName: businessName,
+                  contactFirstName: firstName || undefined,
+                  contactLastName: lastName || undefined,
+                  onboardingResponseId: responseId,
+                  targetRevenue: targetRevenue || undefined,
+                });
+              } catch (clientError) {
+                // Log but don't fail the sync if client creation fails
+                console.error(`Failed to create/update client for ${businessEmail}:`, clientError);
+              }
+            }
+            
         } catch (error) {
           // If error, skip it
           skipped++;

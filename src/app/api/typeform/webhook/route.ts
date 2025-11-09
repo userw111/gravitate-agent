@@ -141,6 +141,139 @@ export async function POST(request: Request) {
         eventType,
         formId,
       });
+      
+      // If this is a form response webhook, also store the response and create/update client
+      const formResponse = payloadObj.form_response as Record<string, unknown> | undefined;
+      
+      if (formResponse && formId) {
+        const responseId = typeof formResponse.token === "string" 
+          ? formResponse.token 
+          : typeof formResponse.response_id === "string"
+          ? formResponse.response_id
+          : undefined;
+        
+        if (responseId) {
+          // Store response if not already stored
+          try {
+            const existingResponse = await convex.query(api.typeform.getResponseByResponseId, {
+              responseId,
+            });
+            
+            if (!existingResponse) {
+              // Fetch form details to get questions
+              let formQuestions: Array<{ id: string; ref: string; title: string; type: string }> = [];
+              let qaPairs: Array<{ question: string; answer: string; fieldRef?: string }> = [];
+              
+              try {
+                const formDetails = await convex.action(api.typeformActions.fetchTypeformFormDetails, {
+                  email: userEmail,
+                  formId: formId!,
+                });
+                
+                if (formDetails?.fields) {
+                  formQuestions = formDetails.fields;
+                  
+                  // Create field map
+                  const fieldMap = new Map<string, { id: string; ref: string; title: string; type: string }>();
+                  formQuestions.forEach((field) => {
+                    fieldMap.set(field.ref, field);
+                  });
+                  
+                  // Create Q&A pairs
+                  const answers = formResponse.answers as Array<{ field?: { id?: string; ref?: string }; text?: string }> | undefined;
+                  qaPairs = answers?.map((answer) => {
+                    const ref = answer.field?.ref;
+                    const field = ref ? fieldMap.get(ref) : null;
+                    return {
+                      question: field?.title || ref || "Unknown Question",
+                      answer: answer.text || "",
+                      fieldRef: ref,
+                    };
+                  }) || [];
+                }
+              } catch (error) {
+                console.error(`Failed to fetch form details for webhook:`, error);
+                // Continue without questions
+              }
+              
+              await convex.mutation(api.typeform.storeResponse, {
+                email: userEmail,
+                formId,
+                responseId,
+                payload: formResponse,
+                questions: formQuestions.length > 0 ? formQuestions : undefined,
+                qaPairs: qaPairs.length > 0 ? qaPairs : undefined,
+              });
+              
+              // Extract client info and create/update client
+              const answers = formResponse.answers as Array<{ text?: string }> | undefined;
+              let businessEmail: string | null = null;
+              let businessName: string | null = null;
+              let firstName: string | null = null;
+              let lastName: string | null = null;
+              let targetRevenue: number | null = null;
+              
+              if (answers && Array.isArray(answers)) {
+                // Extract name (first answer)
+                if (answers[0]?.text) {
+                  const nameParts = answers[0].text.trim().split(/\s+/);
+                  if (nameParts.length >= 1) firstName = nameParts[0];
+                  if (nameParts.length >= 2) lastName = nameParts.slice(1).join(" ");
+                }
+                
+                // Extract business name (second answer)
+                if (answers[1]?.text) {
+                  businessName = answers[1].text.trim();
+                }
+                
+                // Extract email
+                for (const answer of answers) {
+                  if (answer.text && answer.text.includes("@")) {
+                    const emailMatch = answer.text.match(/[\w.-]+@[\w.-]+\.\w+/);
+                    if (emailMatch) {
+                      businessEmail = emailMatch[0];
+                      break;
+                    }
+                  }
+                }
+                
+                // Extract target revenue
+                for (const answer of answers) {
+                  if (answer.text) {
+                    const cleaned = answer.text.replace(/,/g, "").trim();
+                    const num = parseInt(cleaned, 10);
+                    if (!isNaN(num) && num >= 10000 && num <= 10000000) {
+                      targetRevenue = num;
+                      break;
+                    }
+                  }
+                }
+              }
+              
+              // Create/update client if we have business email and name
+              if (businessEmail && businessName) {
+                try {
+                  await convex.mutation(api.clients.upsertClientFromTypeform, {
+                    ownerEmail: userEmail,
+                    businessEmail: businessEmail.toLowerCase().trim(),
+                    businessName: businessName,
+                    contactFirstName: firstName || undefined,
+                    contactLastName: lastName || undefined,
+                    onboardingResponseId: responseId,
+                    targetRevenue: targetRevenue || undefined,
+                  });
+                } catch (clientError) {
+                  // Log but don't fail the webhook if client creation fails
+                  console.error(`Failed to create/update client for ${businessEmail}:`, clientError);
+                }
+              }
+            }
+          } catch (responseError) {
+            // Log but don't fail the webhook
+            console.error(`Failed to process form response:`, responseError);
+          }
+        }
+      }
     } catch (storageError) {
       console.error(`Failed to store webhook for user ${userEmail}:`, storageError);
       return NextResponse.json(

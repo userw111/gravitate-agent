@@ -4,6 +4,7 @@ import SignOutButton from "@/components/SignOutButton";
 import DashboardClient from "@/components/DashboardClient";
 import DashboardStats from "@/components/DashboardStats";
 import UpcomingScripts from "@/components/UpcomingScripts";
+import UnlinkedTranscripts from "@/components/UnlinkedTranscripts";
 
 export default async function Dashboard() {
   const user = await getCurrentUser();
@@ -39,6 +40,11 @@ export default async function Dashboard() {
           <div className="lg:col-span-1">
             <UpcomingScripts email={user.email} />
           </div>
+        </div>
+
+        {/* Unlinked Transcripts Section */}
+        <div className="mt-6">
+          <UnlinkedTranscripts email={user.email} />
         </div>
 
         {/* Sign Out */}

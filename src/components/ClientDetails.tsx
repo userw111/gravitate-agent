@@ -6,10 +6,11 @@ import { extractClientInfo } from "@/lib/typeform";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { useRouter } from "next/navigation";
 import * as React from "react";
+import type { Id } from "../../convex/_generated/dataModel";
 
 type ClientDetailsProps = {
   email: string;
-  responseId: string;
+  responseId: string; // Can be either clientId or onboardingResponseId
 };
 
 function formatShortDate(dateString: string | null): string {
@@ -47,10 +48,43 @@ function getInitials(name: string): string {
 
 export default function ClientDetails({ email, responseId }: ClientDetailsProps) {
   const router = useRouter();
-  const responses = useQuery(api.typeform.getAllResponsesForEmail, { email });
   const [activeTab, setActiveTab] = React.useState("overview");
+  
+  // Convex IDs typically start with 'j' or 'k' followed by alphanumeric characters
+  // Typeform response IDs are longer strings without this prefix
+  // Try onboardingResponseId first since that's what ClientTile uses when available
+  const clientByResponseId = useQuery(
+    api.clients.getClientByOnboardingResponseId,
+    { ownerEmail: email, onboardingResponseId: responseId }
+  );
+  
+  // Also try as clientId if it looks like a Convex ID (starts with 'j' or 'k')
+  const looksLikeClientId = responseId.length > 15 && (responseId.startsWith("j") || responseId.startsWith("k"));
+  const clientById = useQuery(
+    api.clients.getClientById,
+    looksLikeClientId && !clientByResponseId ? { clientId: responseId as Id<"clients"> } : "skip"
+  );
+  
+  // Get the typeform response if we have an onboardingResponseId
+  const typeformResponse = useQuery(
+    api.typeform.getResponseByResponseId,
+    clientById?.onboardingResponseId || clientByResponseId?.onboardingResponseId
+      ? { responseId: clientById?.onboardingResponseId || clientByResponseId?.onboardingResponseId || "" }
+      : "skip"
+  );
+  
+  // Get transcripts for this client
+  const transcripts = useQuery(
+    api.fireflies.getTranscriptsForClient,
+    (clientById?._id || clientByResponseId?._id)
+      ? { clientId: (clientById?._id || clientByResponseId?._id) as Id<"clients"> }
+      : "skip"
+  );
 
-  if (responses === undefined) {
+  const client = clientByResponseId || clientById;
+
+  // Show loading while queries are in progress
+  if (clientByResponseId === undefined && (!looksLikeClientId || clientById === undefined)) {
     return (
       <div className="min-h-screen px-4 py-12 bg-background">
         <div className="mx-auto max-w-7xl">
@@ -62,10 +96,7 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
     );
   }
 
-  // Find the specific client response
-  const clientResponse = responses.find((r) => r._id === responseId);
-  
-  if (!clientResponse) {
+  if (!client) {
     return (
       <div className="min-h-screen px-4 py-12 bg-background">
         <div className="mx-auto max-w-7xl">
@@ -83,22 +114,25 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
     );
   }
 
-  const clientInfo = extractClientInfo(clientResponse.payload as Parameters<typeof extractClientInfo>[0]);
-  
-  const displayName = clientInfo.businessName || 
-    (clientInfo.firstName && clientInfo.lastName ? `${clientInfo.firstName} ${clientInfo.lastName}` : 
-    clientInfo.firstName || "Unknown Client");
+  // Use client data from clients table as primary source
+  const displayName = client.businessName || 
+    (client.contactFirstName && client.contactLastName ? `${client.contactFirstName} ${client.contactLastName}` : 
+    client.contactFirstName || "Unknown Client");
 
-  // Calculate metrics
-  const clientResponses = responses.filter((r) => {
-    const info = extractClientInfo(r.payload as Parameters<typeof extractClientInfo>[0]);
-    return info.email === clientInfo.email;
-  });
-  const totalScriptsGenerated = clientResponses.length;
+  // Extract additional info from typeform response if available
+  let additionalInfo: Partial<ReturnType<typeof extractClientInfo>> = {};
+  if (typeformResponse) {
+    const extracted = extractClientInfo(typeformResponse.payload as Parameters<typeof extractClientInfo>[0]);
+    additionalInfo = extracted;
+  }
 
-  const nextScriptDate = getNextScriptDate(clientInfo.submittedAt);
-  const lastCallDate = clientInfo.submittedAt;
-  const memberSinceDate = clientInfo.submittedAt;
+  const totalScriptsGenerated = 0; // TODO: Calculate from scripts table when implemented
+  const submittedAt = additionalInfo.submittedAt || new Date(client.createdAt).toISOString();
+  const nextScriptDate = getNextScriptDate(submittedAt);
+  const lastCallDate = transcripts && transcripts.length > 0 
+    ? new Date(transcripts[0].date).toISOString() 
+    : submittedAt;
+  const memberSinceDate = new Date(client.createdAt).toISOString();
 
   const initials = displayName
     .split(/\s+/)
@@ -137,8 +171,16 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
             <div>
               <h1 className="text-3xl font-bold text-foreground mb-2">{displayName}</h1>
               <div className="flex items-center gap-3">
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-500 text-white">
-                  Active
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                    client.status === "active"
+                      ? "bg-green-500 text-white"
+                      : client.status === "paused"
+                      ? "bg-yellow-500 text-white"
+                      : "bg-foreground/10 text-foreground/70"
+                  }`}
+                >
+                  {client.status ? client.status.charAt(0).toUpperCase() + client.status.slice(1) : "Inactive"}
                 </span>
                 <span className="text-sm text-foreground/60 font-light">
                   Next in 18d
@@ -174,9 +216,9 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
                   <p className="text-sm text-foreground/60 font-light mb-1">
                     owner: {email.split("@")[0]}
                   </p>
-                  {clientInfo.email && (
+                  {client.businessEmail && (
                     <p className="text-sm text-foreground/60 font-light mb-3">
-                      {clientInfo.email}
+                      {client.businessEmail}
                     </p>
                   )}
                   <div className="flex flex-wrap gap-2 justify-center">

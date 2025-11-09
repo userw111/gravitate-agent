@@ -1,41 +1,52 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "./ui/card";
-import type { ClientInfo } from "@/lib/typeform";
 import { useRouter } from "next/navigation";
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 
 type ClientTileProps = {
-  client: ClientInfo;
-  responseId: string;
+  client: {
+    _id: Id<"clients">;
+    businessName: string;
+    businessEmail: string;
+    contactFirstName?: string;
+    contactLastName?: string;
+    status?: "active" | "paused" | "inactive";
+    onboardingResponseId?: string;
+    createdAt: number;
+  };
 };
 
-function formatDate(dateString: string | null): string {
-  if (!dateString) return "N/A";
-  const date = new Date(dateString);
+function formatDate(timestamp: number): string {
+  const date = new Date(timestamp);
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function getNextScriptDate(submittedAt: string | null): string {
-  if (!submittedAt) return "N/A";
-  // Calculate next script date (e.g., 7 days after submission)
-  const date = new Date(submittedAt);
+function getNextScriptDate(createdAt: number): string {
+  // Calculate next script date (e.g., 7 days after creation)
+  const date = new Date(createdAt);
   date.setDate(date.getDate() + 7);
-  return formatDate(date.toISOString());
+  return formatDate(date.getTime());
 }
 
-export default function ClientTile({ client, responseId }: ClientTileProps) {
+export default function ClientTile({ client }: ClientTileProps) {
   const router = useRouter();
-  const displayName = client.businessName || 
-    (client.firstName && client.lastName ? `${client.firstName} ${client.lastName}` : 
-    client.firstName || "Unknown Client");
   
-  const fullName = client.firstName && client.lastName 
-    ? `${client.firstName} ${client.lastName}` 
-    : client.firstName || null;
+  // TODO: Add query to get transcripts by clientId
+  // For now, we'll use createdAt as last call date
+  const lastCallDate = client.createdAt;
+  
+  const displayName = client.businessName || 
+    (client.contactFirstName && client.contactLastName ? `${client.contactFirstName} ${client.contactLastName}` : 
+    client.contactFirstName || "Unknown Client");
+  
+  const fullName = client.contactFirstName && client.contactLastName 
+    ? `${client.contactFirstName} ${client.contactLastName}` 
+    : client.contactFirstName || null;
 
-  // Status is always "Unknown" for now (can be enhanced later)
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  const status: "Active" | "Unknown" = ("Unknown" as "Active" | "Unknown");
+  const status = client.status || "inactive";
 
   return (
     <Card className="transition-all duration-200 hover:border-blue-500/30 hover:shadow-lg hover:-translate-y-0.5 bg-linear-to-br from-background to-background/95">
@@ -48,9 +59,9 @@ export default function ClientTile({ client, responseId }: ClientTileProps) {
                 {fullName}
               </p>
             )}
-            {client.email && (
+            {client.businessEmail && (
               <p className="text-xs text-foreground/50 font-light mt-1 truncate">
-                {client.email}
+                {client.businessEmail}
               </p>
             )}
           </div>
@@ -60,12 +71,14 @@ export default function ClientTile({ client, responseId }: ClientTileProps) {
         <div className="mt-3">
           <span
             className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-              status === "Active"
+              status === "active"
                 ? "bg-green-500 text-white"
+                : status === "paused"
+                ? "bg-yellow-500 text-white"
                 : "bg-foreground/10 text-foreground/70"
             }`}
           >
-            {status}
+            {status.charAt(0).toUpperCase() + status.slice(1)}
           </span>
         </div>
 
@@ -85,7 +98,7 @@ export default function ClientTile({ client, responseId }: ClientTileProps) {
                 fill="currentColor"
               />
             </svg>
-            <span className="font-light">Next script: {getNextScriptDate(client.submittedAt)}</span>
+            <span className="font-light">Next script: {getNextScriptDate(client.createdAt)}</span>
           </div>
           <div className="flex items-center gap-2 text-sm text-foreground/70">
             <svg
@@ -101,20 +114,20 @@ export default function ClientTile({ client, responseId }: ClientTileProps) {
                 fill="currentColor"
               />
             </svg>
-            <span className="font-light">Last call: {formatDate(client.submittedAt)}</span>
+            <span className="font-light">Last call: {formatDate(lastCallDate)}</span>
           </div>
         </div>
       </CardHeader>
       
       <CardContent className="pt-0">
-        {client.email && (
+        {client.businessEmail && (
           <div className="space-y-1">
             <p className="text-xs text-foreground/50 font-light">Email</p>
             <a
-              href={`mailto:${client.email}`}
+              href={`mailto:${client.businessEmail}`}
               className="text-sm text-foreground/80 hover:text-foreground transition-colors break-all"
             >
-              {client.email}
+              {client.businessEmail}
             </a>
           </div>
         )}
@@ -122,7 +135,11 @@ export default function ClientTile({ client, responseId }: ClientTileProps) {
 
       <CardFooter className="pt-0">
         <button
-          onClick={() => router.push(`/dashboard/clients/${responseId}`)}
+          onClick={() => {
+            // Use clientId if we have onboardingResponseId, otherwise use client._id
+            const routeId = client.onboardingResponseId || client._id;
+            router.push(`/dashboard/clients/${routeId}`);
+          }}
           className="w-full px-4 py-2 text-sm rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 transition-all duration-150 font-light"
         >
           View Details

@@ -194,6 +194,17 @@ export const storeResponse = mutation({
     formId: v.string(),
     responseId: v.string(),
     payload: v.any(),
+    questions: v.optional(v.array(v.object({
+      id: v.string(),
+      ref: v.string(),
+      title: v.string(),
+      type: v.string(),
+    }))),
+    qaPairs: v.optional(v.array(v.object({
+      question: v.string(),
+      answer: v.string(),
+      fieldRef: v.optional(v.string()),
+    }))),
   },
   handler: async (ctx: MutationCtx, args) => {
     return await ctx.db.insert("typeform_responses", {
@@ -202,7 +213,47 @@ export const storeResponse = mutation({
       responseId: args.responseId,
       payload: args.payload,
       syncedAt: Date.now(),
+      questions: args.questions,
+      qaPairs: args.qaPairs,
     });
+  },
+});
+
+/**
+ * Update existing response with questions and Q&A pairs
+ */
+export const updateResponseWithQuestions = mutation({
+  args: {
+    responseId: v.string(),
+    questions: v.optional(v.array(v.object({
+      id: v.string(),
+      ref: v.string(),
+      title: v.string(),
+      type: v.string(),
+    }))),
+    qaPairs: v.optional(v.array(v.object({
+      question: v.string(),
+      answer: v.string(),
+      fieldRef: v.optional(v.string()),
+    }))),
+  },
+  handler: async (ctx: MutationCtx, args) => {
+    const existing = await ctx.db
+      .query("typeform_responses")
+      .withIndex("by_response_id", (q) => q.eq("responseId", args.responseId))
+      .first();
+    
+    if (!existing) {
+      throw new Error(`Response not found: ${args.responseId}`);
+    }
+    
+    // Always update both fields if provided
+    await ctx.db.patch(existing._id, {
+      questions: args.questions,
+      qaPairs: args.qaPairs,
+    });
+    
+    return existing._id;
   },
 });
 
@@ -215,6 +266,67 @@ export const getAllResponsesForEmail = query({
       .order("desc")
       .collect();
     return responses;
+  },
+});
+
+/**
+ * Get count of unlinked Typeform responses (for notification badge)
+ */
+export const getUnlinkedResponsesCountForEmail = query({
+  args: { email: v.string() },
+  handler: async (ctx: QueryCtx, args) => {
+    // Get all responses
+    const allResponses = await ctx.db
+      .query("typeform_responses")
+      .withIndex("by_email_synced", (q) => q.eq("email", args.email))
+      .collect();
+    
+    // Get all clients
+    const allClients = await ctx.db
+      .query("clients")
+      .withIndex("by_owner", (q) => q.eq("ownerEmail", args.email))
+      .collect();
+    
+    // Create a set of responseIds that have clients
+    const linkedResponseIds = new Set(
+      allClients
+        .map((c) => c.onboardingResponseId)
+        .filter((id): id is string => id !== undefined)
+    );
+    
+    // Return count of unlinked responses
+    return allResponses.filter((r) => !linkedResponseIds.has(r.responseId)).length;
+  },
+});
+
+/**
+ * Get all unlinked Typeform responses (responses without a corresponding client)
+ */
+export const getUnlinkedResponsesForEmail = query({
+  args: { email: v.string() },
+  handler: async (ctx: QueryCtx, args) => {
+    // Get all responses
+    const allResponses = await ctx.db
+      .query("typeform_responses")
+      .withIndex("by_email_synced", (q) => q.eq("email", args.email))
+      .order("desc")
+      .collect();
+    
+    // Get all clients
+    const allClients = await ctx.db
+      .query("clients")
+      .withIndex("by_owner", (q) => q.eq("ownerEmail", args.email))
+      .collect();
+    
+    // Create a set of responseIds that have clients
+    const linkedResponseIds = new Set(
+      allClients
+        .map((c) => c.onboardingResponseId)
+        .filter((id): id is string => id !== undefined)
+    );
+    
+    // Filter to only unlinked responses
+    return allResponses.filter((r) => !linkedResponseIds.has(r.responseId));
   },
 });
 

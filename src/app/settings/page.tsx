@@ -17,7 +17,10 @@ export default async function SettingsPage() {
           email={user.email}
           appUrl={process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}
         />
-        <FirefliesSettingsCard email={user.email} />
+        <FirefliesSettingsCard
+          email={user.email}
+          appUrl={process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}
+        />
       </div>
     </div>
   );

@@ -2,7 +2,6 @@
 
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { extractClientInfo, type ClientInfo } from "@/lib/typeform";
 import ClientTile from "./ClientTile";
 import { SegmentedControl } from "./ui/segmented-control";
 import * as React from "react";
@@ -11,63 +10,46 @@ type DashboardClientProps = {
   email: string;
 };
 
-type ClientStatus = "all" | "active" | "paused" | "unknown";
+type ClientStatus = "all" | "active" | "paused" | "inactive";
 
 export default function DashboardClient({ email }: DashboardClientProps) {
   const [filter, setFilter] = React.useState<ClientStatus>("all");
   const [searchQuery, setSearchQuery] = React.useState("");
-  const responses = useQuery(api.typeform.getAllResponsesForEmail, { email });
-
-  if (responses === undefined) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-sm text-foreground/60 font-light">Loading clients...</p>
-      </div>
-    );
-  }
-
-  if (responses.length === 0) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-sm text-foreground/60 font-light">
-          No clients found. Sync responses from your Typeform to get started.
-        </p>
-      </div>
-    );
-  }
-
-  // Extract client info from each response
-  const allClients: ClientInfo[] = responses.map((response) => {
-    const clientInfo = extractClientInfo(response.payload as Parameters<typeof extractClientInfo>[0]);
-    return clientInfo;
-  });
+  const clients = useQuery(api.clients.getAllClientsForOwner, { ownerEmail: email });
 
   // Filter clients based on selected status and search query
+  // IMPORTANT: This hook must be called before any early returns to maintain hook order
   const filteredClients = React.useMemo(() => {
-    let clients = allClients;
+    // Return empty array if clients are not loaded yet
+    if (clients === undefined) {
+      return [];
+    }
+
+    let filtered = clients;
 
     // Filter by status
     if (filter !== "all") {
-      // For now, all clients have "Unknown" status, so we'll filter accordingly
-      // This can be enhanced when status tracking is implemented
-      if (filter === "unknown") {
-        clients = allClients; // All current clients are unknown
-      } else if (filter === "active") {
-        clients = []; // No active clients yet
+      filtered = filtered.filter((client) => {
+        if (filter === "active") {
+          return client.status === "active";
       } else if (filter === "paused") {
-        clients = []; // No paused clients yet
+          return client.status === "paused";
+        } else if (filter === "inactive") {
+          return client.status === "inactive" || !client.status;
       }
+        return true;
+      });
     }
 
     // Filter by search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase().trim();
-      clients = clients.filter((client) => {
+      filtered = filtered.filter((client) => {
         const businessName = client.businessName?.toLowerCase() || "";
-        const firstName = client.firstName?.toLowerCase() || "";
-        const lastName = client.lastName?.toLowerCase() || "";
+        const firstName = client.contactFirstName?.toLowerCase() || "";
+        const lastName = client.contactLastName?.toLowerCase() || "";
         const fullName = `${firstName} ${lastName}`.trim();
-        const email = client.email?.toLowerCase() || "";
+        const email = client.businessEmail?.toLowerCase() || "";
         
         return (
           businessName.includes(query) ||
@@ -79,8 +61,26 @@ export default function DashboardClient({ email }: DashboardClientProps) {
       });
     }
 
-    return clients;
-  }, [allClients, filter, searchQuery]);
+    return filtered;
+  }, [clients, filter, searchQuery]);
+
+  if (clients === undefined) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-sm text-foreground/60 font-light">Loading clients...</p>
+      </div>
+    );
+  }
+
+  if (clients.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-sm text-foreground/60 font-light">
+          No clients found. Sync responses from your Typeform to get started.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -127,7 +127,7 @@ export default function DashboardClient({ email }: DashboardClientProps) {
               { value: "all", label: "All" },
               { value: "active", label: "Active" },
               { value: "paused", label: "Paused" },
-              { value: "unknown", label: "Unknown" },
+              { value: "inactive", label: "Inactive" },
             ]}
             value={filter}
             onChange={(value) => setFilter(value as ClientStatus)}
@@ -142,15 +142,9 @@ export default function DashboardClient({ email }: DashboardClientProps) {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filteredClients.map((client, index) => {
-            const response = responses.find((r) => {
-              const clientInfo = extractClientInfo(r.payload as Parameters<typeof extractClientInfo>[0]);
-              return clientInfo.responseId === client.responseId;
-            });
-            return response ? (
-              <ClientTile key={response._id} client={client} responseId={response._id} />
-            ) : null;
-          })}
+          {filteredClients.map((client) => (
+            <ClientTile key={client._id} client={client} />
+          ))}
         </div>
       )}
     </div>
