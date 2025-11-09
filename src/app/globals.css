@@ -19,6 +19,17 @@
   }
 }
 
+/* Explicit theme override via data-theme attribute (takes precedence) */
+:root[data-theme="light"] {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+:root[data-theme="dark"] {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

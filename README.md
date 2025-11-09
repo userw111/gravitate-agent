@@ -145,6 +145,40 @@ pnpm preview
 
 This builds and runs your application locally using Wrangler's dev server.
 
+### Cloudflared Named Tunnel (stable public URL for local dev)
+
+1. Install cloudflared:
+   ```bash
+   brew install cloudflared
+   ```
+2. Authenticate and create a tunnel:
+   ```bash
+   pnpm tunnel:login
+   pnpm tunnel:create
+   ```
+   Note the printed TUNNEL_ID.
+3. Route DNS to your subdomain:
+   ```bash
+   pnpm tunnel:dns
+   ```
+   Replace `dev.yourdomain.com` in `package.json` with your actual domain first.
+4. Configure the tunnel:
+   - Copy `cloudflared/config.yml.example` to `cloudflared/config.yml`
+   - Fill in your `<TUNNEL_ID>`, `credentials-file` path, and `hostname`
+5. Run the tunnel:
+   ```bash
+   pnpm tunnel:run
+   ```
+6. Update environment and WorkOS redirects:
+   - `.env.local`:
+     ```env
+     NEXT_PUBLIC_APP_URL=https://dev.yourdomain.com
+     ```
+   - WorkOS Dashboard → Redirect URIs:
+     - Login Redirect: `https://dev.yourdomain.com/api/auth/callback`
+     - Logout Redirect (optional): `https://dev.yourdomain.com/`
+7. Restart your dev server and test sign-in/sign-out at `https://dev.yourdomain.com`.
+
 ### Other Platforms
 
 For other platforms (Vercel, Netlify, etc.), you'll need to adjust the build configuration. The current setup is optimized for Cloudflare Workers.

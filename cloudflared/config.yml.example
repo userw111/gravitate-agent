@@ -1,0 +1,22 @@
+# Copy this file to cloudflared/config.yml and fill in the values.
+#
+# Prereqs (one-time):
+# 1) cloudflared tunnel login
+# 2) cloudflared tunnel create gravitate-agent
+#    - Note the <TUNNEL_ID> that is printed
+# 3) cloudflared tunnel route dns gravitate-agent dev.yourdomain.com
+#
+# Then update the values below and run:
+# cloudflared tunnel --config cloudflared/config.yml run gravitate-agent
+#
+# Tip: Use pnpm scripts added in package.json for convenience.
+
+tunnel: <TUNNEL_ID>
+credentials-file: /Users/<you>/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: dev.yourdomain.com
+    service: http://localhost:3000
+  - service: http_status:404
+
+
