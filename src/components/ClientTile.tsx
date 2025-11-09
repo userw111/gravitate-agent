@@ -2,9 +2,11 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "./ui/card";
 import type { ClientInfo } from "@/lib/typeform";
+import { useRouter } from "next/navigation";
 
 type ClientTileProps = {
   client: ClientInfo;
+  responseId: string;
 };
 
 function formatDate(dateString: string | null): string {
@@ -21,7 +23,8 @@ function getNextScriptDate(submittedAt: string | null): string {
   return formatDate(date.toISOString());
 }
 
-export default function ClientTile({ client }: ClientTileProps) {
+export default function ClientTile({ client, responseId }: ClientTileProps) {
+  const router = useRouter();
   const displayName = client.businessName || 
     (client.firstName && client.lastName ? `${client.firstName} ${client.lastName}` : 
     client.firstName || "Unknown Client");
@@ -118,7 +121,10 @@ export default function ClientTile({ client }: ClientTileProps) {
       </CardContent>
 
       <CardFooter className="pt-0">
-        <button className="w-full px-4 py-2 text-sm rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 transition-all duration-150 font-light">
+        <button
+          onClick={() => router.push(`/dashboard/clients/${responseId}`)}
+          className="w-full px-4 py-2 text-sm rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 transition-all duration-150 font-light"
+        >
           View Details
         </button>
       </CardFooter>

@@ -33,6 +33,27 @@ export default defineSchema({
     .index("by_email_form", ["email", "formId"])
     .index("by_email_synced", ["email", "syncedAt"])
     .index("by_response_id", ["responseId"]),
+  fireflies_configs: defineTable({
+    email: v.string(),
+    apiKey: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_email", ["email"]),
+  fireflies_transcripts: defineTable({
+    email: v.string(),
+    transcriptId: v.string(),
+    meetingId: v.string(),
+    title: v.string(),
+    transcript: v.string(),
+    date: v.number(),
+    duration: v.optional(v.number()),
+    participants: v.optional(v.array(v.string())),
+    syncedAt: v.number(),
+  })
+    .index("by_email", ["email"])
+    .index("by_email_synced", ["email", "syncedAt"])
+    .index("by_transcript_id", ["transcriptId"])
+    .index("by_meeting_id", ["meetingId"]),
 });
 
 

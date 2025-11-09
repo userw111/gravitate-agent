@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as fireflies from "../fireflies.js";
+import type * as firefliesActions from "../firefliesActions.js";
 import type * as typeform from "../typeform.js";
 import type * as typeformActions from "../typeformActions.js";
 import type * as users from "../users.js";
@@ -27,6 +29,8 @@ import type {
  * ```
  */
 declare const fullApi: ApiFromModules<{
+  fireflies: typeof fireflies;
+  firefliesActions: typeof firefliesActions;
   typeform: typeof typeform;
   typeformActions: typeof typeformActions;
   users: typeof users;

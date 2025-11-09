@@ -148,7 +148,7 @@ export default function DashboardClient({ email }: DashboardClientProps) {
               return clientInfo.responseId === client.responseId;
             });
             return response ? (
-              <ClientTile key={response._id} client={client} />
+              <ClientTile key={response._id} client={client} responseId={response._id} />
             ) : null;
           })}
         </div>
