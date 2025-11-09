@@ -73,6 +73,16 @@ export default function Navbar({ user }: { user: NavbarUser | null }) {
                 <span className="absolute -top-0.5 -right-1 h-2 w-2 rounded-full bg-red-500 border border-background" />
               )}
             </Link>
+            <Link
+              href="/chat"
+              className={`text-sm transition-colors ${
+                pathname === "/chat"
+                  ? "text-foreground font-medium"
+                  : "text-foreground/60 hover:text-foreground"
+              }`}
+            >
+              AI Chat
+            </Link>
           </nav>
           
           {/* Mobile menu button */}
@@ -149,6 +159,17 @@ export default function Navbar({ user }: { user: NavbarUser | null }) {
                 {unlinkedCount !== undefined && unlinkedCount > 0 && (
                   <span className="absolute -top-0.5 -right-1 h-2 w-2 rounded-full bg-red-500 border border-background" />
                 )}
+              </Link>
+              <Link
+                href="/chat"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`text-sm transition-colors ${
+                  pathname === "/chat"
+                    ? "text-foreground font-medium"
+                    : "text-foreground/60 hover:text-foreground"
+                }`}
+              >
+                AI Chat
               </Link>
             </nav>
           </div>
