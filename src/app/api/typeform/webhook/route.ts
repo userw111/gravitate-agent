@@ -30,16 +30,16 @@ function verifySignature(rawBody: string, signature: string | null, secret: stri
     const expectedSignatureBase64 = Buffer.from(expectedSignatureHex, "hex").toString("base64");
     if (cleanSignature.length === expectedSignatureBase64.length) {
       return crypto.timingSafeEqual(
-        Buffer.from(cleanSignature),
-        Buffer.from(expectedSignatureBase64)
+        Buffer.from(cleanSignature, "base64"),
+        Buffer.from(expectedSignatureBase64, "base64")
       );
     }
+    // If lengths don't match either format, signature is invalid
+    return false;
   } catch {
-    // If comparison fails, signature is invalid
+    // If comparison fails (e.g., invalid hex/base64), signature is invalid
     return false;
   }
-  
-  return false;
 }
 
 export async function POST(request: Request) {
@@ -47,37 +47,81 @@ export async function POST(request: Request) {
     const url = new URL(request.url);
     const userEmail = url.searchParams.get("user");
     if (!userEmail) {
-      return NextResponse.json({ error: "Missing user parameter" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing user parameter in query string" },
+        { status: 400 }
+      );
     }
 
     if (!convex) {
-      return NextResponse.json({ error: "Convex not configured" }, { status: 500 });
+      console.error("Convex client not initialized: NEXT_PUBLIC_CONVEX_URL is missing");
+      return NextResponse.json(
+        { error: "Server configuration error: Convex not configured" },
+        { status: 500 }
+      );
     }
 
     // Get raw body as text for signature verification
+    // Note: This consumes the body stream, so we must parse it after
     const rawBody = await request.text();
     
+    if (!rawBody || rawBody.length === 0) {
+      return NextResponse.json(
+        { error: "Empty request body" },
+        { status: 400 }
+      );
+    }
+
     // Get user's webhook secret
-    const config = await convex.query(api.typeform.getConfigForEmail, { email: userEmail });
+    let config;
+    try {
+      config = await convex.query(api.typeform.getConfigForEmail, { email: userEmail });
+    } catch (error) {
+      console.error(`Failed to fetch config for user ${userEmail}:`, error);
+      return NextResponse.json(
+        { error: "Failed to retrieve webhook configuration" },
+        { status: 500 }
+      );
+    }
+
     if (!config?.secret) {
-      return NextResponse.json({ error: "Webhook secret not configured" }, { status: 400 });
+      return NextResponse.json(
+        { error: `Webhook secret not configured for user: ${userEmail}. Please generate a secret in settings to enable webhook verification.` },
+        { status: 400 }
+      );
     }
 
     // Verify signature
+    // Typeform uses "typeform-signature" header (primary), with fallbacks for compatibility
     const signature = request.headers.get("typeform-signature") || 
                       request.headers.get("x-typeform-signature") ||
                       request.headers.get("signature");
     
+    if (!signature) {
+      return NextResponse.json(
+        { error: "Missing signature header. Expected 'typeform-signature' header." },
+        { status: 401 }
+      );
+    }
+
     if (!verifySignature(rawBody, signature, config.secret)) {
-      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+      console.warn(`Signature verification failed for user ${userEmail}`);
+      return NextResponse.json(
+        { error: "Invalid webhook signature. Signature verification failed." },
+        { status: 401 }
+      );
     }
 
     // Parse JSON payload
     let payload: unknown;
     try {
       payload = JSON.parse(rawBody);
-    } catch {
-      return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+    } catch (parseError) {
+      console.error("Failed to parse webhook payload as JSON:", parseError);
+      return NextResponse.json(
+        { error: "Invalid JSON payload. Failed to parse request body." },
+        { status: 400 }
+      );
     }
 
     // Extract event type and form ID from payload
@@ -90,17 +134,29 @@ export async function POST(request: Request) {
       : typeof payloadObj.form_id === "string" ? payloadObj.form_id : undefined;
 
     // Store webhook in Convex
-    await convex.mutation(api.typeform.storeWebhook, {
-      email: userEmail,
-      payload,
-      eventType,
-      formId,
-    });
+    try {
+      await convex.mutation(api.typeform.storeWebhook, {
+        email: userEmail,
+        payload,
+        eventType,
+        formId,
+      });
+    } catch (storageError) {
+      console.error(`Failed to store webhook for user ${userEmail}:`, storageError);
+      return NextResponse.json(
+        { error: "Failed to store webhook payload in database" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    console.error("Typeform webhook error:", e);
-    return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 });
+    const error = e instanceof Error ? e : new Error(String(e));
+    console.error("Typeform webhook processing error:", error);
+    return NextResponse.json(
+      { error: `Webhook processing failed: ${error.message}` },
+      { status: 500 }
+    );
   }
 }
 

@@ -9,6 +9,7 @@
  */
 
 import type * as typeform from "../typeform.js";
+import type * as typeformActions from "../typeformActions.js";
 import type * as users from "../users.js";
 
 import type {
@@ -27,6 +28,7 @@ import type {
  */
 declare const fullApi: ApiFromModules<{
   typeform: typeof typeform;
+  typeformActions: typeof typeformActions;
   users: typeof users;
 }>;
 declare const fullApiWithMounts: typeof fullApi;

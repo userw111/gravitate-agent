@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import SignOutButton from "@/components/SignOutButton";
+import DashboardClient from "@/components/DashboardClient";
+import DashboardStats from "@/components/DashboardStats";
+import UpcomingScripts from "@/components/UpcomingScripts";
 
 export default async function Dashboard() {
   const user = await getCurrentUser();
@@ -10,34 +13,37 @@ export default async function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-12 bg-background">
-      <div className="w-full max-w-[600px] animate-blur-focus">
+    <div className="min-h-screen px-4 py-12 bg-background">
+      <div className="mx-auto max-w-7xl">
         {/* Header */}
-        <div className="mb-16 text-center animate-rotate-fade">
+        <div className="mb-12 text-center animate-rotate-fade">
           <h1 className="text-4xl font-light tracking-tight text-foreground mb-3 transition-all duration-150 cursor-default">
-            Welcome
+            Dashboard
           </h1>
           <p className="text-base text-foreground/60 font-light animate-elastic-bounce delay-50">
             {user.email}
           </p>
         </div>
 
-        {/* Main Content */}
-        <div className="space-y-8 animate-fade-in-simple delay-100">
-          {/* Welcome Card */}
-          <div className="border border-foreground/10 rounded-lg p-8 transition-all duration-150 hover:border-foreground/20">
-            <h2 className="text-xl font-light text-foreground mb-4">
-              You're signed in
-            </h2>
-            <p className="text-sm text-foreground/60 font-light leading-relaxed">
-              Your Gravitate Agent dashboard is ready. Start exploring what you can do.
-            </p>
+        {/* Stats Cards */}
+        <DashboardStats email={user.email} />
+
+        {/* Main Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Clients Section */}
+          <div className="lg:col-span-2">
+            <DashboardClient email={user.email} />
           </div>
 
-          {/* Sign Out */}
-          <div className="flex justify-center pt-4">
-            <SignOutButton />
+          {/* Upcoming Scripts Section */}
+          <div className="lg:col-span-1">
+            <UpcomingScripts email={user.email} />
           </div>
+        </div>
+
+        {/* Sign Out */}
+        <div className="flex justify-center pt-8 mt-12 border-t border-foreground/10">
+          <SignOutButton />
         </div>
       </div>
     </div>
