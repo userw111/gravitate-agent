@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 import type { Id } from "../../convex/_generated/dataModel";
+import UnlinkedTranscripts from "./UnlinkedTranscripts";
 
 type ClientDetailsProps = {
   email: string;
@@ -288,7 +289,7 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
                       <span>Skip next drop</span>
                     </label>
                     <label className="flex items-center gap-2 text-sm font-light cursor-pointer">
-                      <input type="checkbox" checked className="rounded border-foreground/20" />
+                      <input type="checkbox" defaultChecked className="rounded border-foreground/20" />
                       <span>Resume schedule</span>
                     </label>
                   </div>
@@ -401,7 +402,7 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
 
             {/* Tabs */}
             <div className="flex gap-1 border-b border-foreground/10">
-              {["Overview", "Scripts", "Inputs", "Call Intelligence", "History & Logs"].map((tab) => (
+              {["Overview", "Scripts", "Inputs", "Call Intelligence", "Transcripts", "History & Logs"].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab.toLowerCase().replace(" & ", "-").replace(" ", "-"))}
@@ -497,8 +498,19 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
               </div>
             )}
 
+            {/* Transcripts Tab */}
+            {activeTab === "transcripts" && (
+              <div>
+                <UnlinkedTranscripts 
+                  email={email} 
+                  clientId={client._id} 
+                  showEditButton={true}
+                />
+              </div>
+            )}
+
             {/* Other tabs placeholder */}
-            {activeTab !== "overview" && (
+            {activeTab !== "overview" && activeTab !== "transcripts" && (
               <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
                 <CardContent className="py-12 text-center">
                   <p className="text-sm text-foreground/60 font-light">

@@ -19,12 +19,18 @@ export default function FirefliesSettingsCard({ email, appUrl }: { email: string
   const setApiKey = useMutation(api.fireflies.setApiKeyForEmail);
   const setWebhookSecret = useMutation(api.fireflies.setWebhookSecretForEmail);
   const syncTranscripts = useAction(api.firefliesActions.syncFirefliesTranscripts);
+  const createTestTranscript = useAction(api.firefliesActions.createTestTranscript);
   
   const [pending, setPending] = React.useState(false);
   const [secretPending, setSecretPending] = React.useState(false);
   const [testWebhookPending, setTestWebhookPending] = React.useState(false);
   const [syncPending, setSyncPending] = React.useState(false);
   const [syncResult, setSyncResult] = React.useState<{ synced: number; skipped: number; total: number } | null>(null);
+  const [testLinkingPending, setTestLinkingPending] = React.useState(false);
+  const [testLinkingResult, setTestLinkingResult] = React.useState<{ transcriptId: string; status: string } | null>(null);
+  const [testLinkingLogs, setTestLinkingLogs] = React.useState<Array<{ type: string; message: string; timestamp: number }>>([]);
+  const [showTestLogs, setShowTestLogs] = React.useState(false);
+  const logsContainerRef = React.useRef<HTMLDivElement>(null);
   const [apiKeyValue, setApiKeyValue] = React.useState("");
   const [webhookSecretValue, setWebhookSecretValue] = React.useState("");
   const [showUpdateKeyDialog, setShowUpdateKeyDialog] = React.useState(false);
@@ -94,6 +100,92 @@ export default function FirefliesSettingsCard({ email, appUrl }: { email: string
       setSyncPending(false);
     }
   }, [email, syncTranscripts]);
+
+  const handleTestLinking = React.useCallback(async () => {
+    setTestLinkingPending(true);
+    setTestLinkingResult(null);
+    setTestLinkingLogs([]);
+    setShowTestLogs(true);
+    
+    try {
+      const response = await fetch("/api/fireflies/test-linking-stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error("No response body");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.trim() === "" || !line.startsWith("data: ")) continue;
+          
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.message === "[DONE]") {
+              continue;
+            }
+            
+            setTestLinkingLogs((prev) => {
+              const updated = [...prev, data];
+              // Extract final status when we see completion message
+              if (data.type === "success" && data.message.includes("Test complete:")) {
+                const statusMatch = data.message.match(/Test complete: (\w+)/);
+                if (statusMatch) {
+                  const transcriptIdMatch = updated.find((log) => 
+                    log.message.includes("Test transcript created:")
+                  )?.message.match(/Test transcript created: (.+)/);
+                  setTestLinkingResult({
+                    transcriptId: transcriptIdMatch?.[1] || "unknown",
+                    status: statusMatch[1],
+                  });
+                }
+              }
+              return updated;
+            });
+          } catch (e) {
+            // Ignore parse errors
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed to create test transcript:", error);
+      setTestLinkingLogs((prev) => [
+        ...prev,
+        {
+          type: "error",
+          message: error instanceof Error ? error.message : "Failed to create test transcript",
+          timestamp: Date.now(),
+        },
+      ]);
+    } finally {
+      setTestLinkingPending(false);
+    }
+  }, [email]);
+
+  // Auto-scroll logs container when new logs are added
+  React.useEffect(() => {
+    if (logsContainerRef.current && testLinkingLogs.length > 0) {
+      logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
+    }
+  }, [testLinkingLogs]);
 
   // Update tick for relative time display
   React.useEffect(() => {
@@ -435,6 +527,90 @@ export default function FirefliesSettingsCard({ email, appUrl }: { email: string
                 </p>
               </div>
             )}
+
+            <div className="pt-4 border-t border-foreground/10 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-medium mb-1">Test AI Linking</h3>
+                  <p className="text-xs text-foreground/60">
+                    Create a test transcript and trigger the intelligent linking pipeline
+                  </p>
+                </div>
+                <button
+                  onClick={handleTestLinking}
+                  disabled={testLinkingPending}
+                  className="px-4 py-2 text-sm rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 disabled:opacity-50 transition-all duration-150"
+                >
+                  {testLinkingPending ? "Testing..." : "Test AI Linking"}
+                </button>
+              </div>
+
+              {showTestLogs && testLinkingLogs.length > 0 && (
+                <div className="p-3 rounded-md bg-foreground/5 border border-foreground/10">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-xs font-medium text-foreground/70">Agent Activity Log</h4>
+                    <button
+                      onClick={() => setShowTestLogs(false)}
+                      className="text-xs text-foreground/50 hover:text-foreground/70"
+                    >
+                      Hide
+                    </button>
+                  </div>
+                  <div 
+                    ref={logsContainerRef}
+                    className="space-y-1 max-h-64 overflow-y-auto font-mono text-xs"
+                  >
+                    {testLinkingLogs.map((log, idx) => (
+                      <div
+                        key={idx}
+                        className={`${
+                          log.type === "error"
+                            ? "text-red-600 dark:text-red-400"
+                            : log.type === "success"
+                            ? "text-green-600 dark:text-green-400"
+                            : log.type === "warning"
+                            ? "text-yellow-600 dark:text-yellow-400"
+                            : "text-foreground/70"
+                        }`}
+                      >
+                        {log.message}
+                      </div>
+                    ))}
+                    {testLinkingPending && (
+                      <div className="text-foreground/50 animate-pulse">⏳ Processing...</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {testLinkingResult && (
+                <div className="p-3 rounded-md bg-foreground/5 border border-foreground/10">
+                  <p className="text-sm text-foreground/70 mb-1">
+                    Test transcript created: <code className="text-xs">{testLinkingResult.transcriptId}</code>
+                  </p>
+                  <p className="text-xs text-foreground/60">
+                    Status: <span className="font-medium">{testLinkingResult.status}</span>
+                  </p>
+                  {testLinkingResult.status === "escalated_to_telegram" && (
+                    <p className="text-xs text-foreground/50 mt-1">
+                      Check your Telegram for the notification
+                    </p>
+                  )}
+                  {testLinkingResult.status === "needs_manual_review" && (
+                    <p className="text-xs text-foreground/50 mt-1">
+                      <a
+                        href={`/resolve-transcript/${testLinkingResult.transcriptId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        Review manually →
+                      </a>
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
 
             {transcripts && transcripts.length > 0 && (
               <div className="space-y-2">

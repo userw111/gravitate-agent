@@ -147,6 +147,19 @@ export const findClientByParticipantEmail = query({
 });
 
 /**
+ * Retrieve all clients for an owner (used for intelligent transcript linking)
+ */
+export const getClientsForLinking = query({
+  args: { ownerEmail: v.string() },
+  handler: async (ctx: QueryCtx, args) => {
+    return await ctx.db
+      .query("clients")
+      .withIndex("by_owner", (q) => q.eq("ownerEmail", args.ownerEmail))
+      .collect();
+  },
+});
+
+/**
  * Link a transcript to a client
  */
 export const linkTranscriptToClient = mutation({
@@ -213,6 +226,31 @@ export const linkResponseToClient = mutation({
 
     await ctx.db.patch(args.clientId, {
       onboardingResponseId: args.responseId,
+      updatedAt: Date.now(),
+    });
+
+    return args.clientId;
+  },
+});
+
+/**
+ * Update client's business email (for adding participant emails for auto-linking)
+ */
+export const updateClientEmail = mutation({
+  args: {
+    clientId: v.id("clients"),
+    email: v.string(),
+  },
+  handler: async (ctx: MutationCtx, args) => {
+    const client = await ctx.db.get(args.clientId);
+    if (!client) {
+      throw new Error(`Client not found: ${args.clientId}`);
+    }
+
+    // Update businessEmail if it's not set, or set it to the new email
+    // This allows auto-linking future transcripts with this email
+    await ctx.db.patch(args.clientId, {
+      businessEmail: args.email.toLowerCase().trim(),
       updatedAt: Date.now(),
     });
 

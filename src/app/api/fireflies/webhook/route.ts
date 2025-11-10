@@ -184,17 +184,42 @@ export async function POST(request: Request) {
       );
     }
 
-    // Now fetch the actual transcript data from Fireflies API
+    // Now fetch the actual transcript data from Fireflies API and process linking
     // This happens asynchronously - we return success immediately and fetch in background
     if (eventType === "Transcription completed" || eventType === "transcription.completed") {
-      // Fetch transcript data asynchronously (don't wait for it)
+      // Fetch and store transcript (this handles auto-linking via participant emails)
       convex.action(api.firefliesActions.fetchAndStoreTranscriptById, {
         email: userEmail,
         meetingId: meetingId,
-      }).catch((error) => {
-        console.error(`Failed to fetch transcript ${meetingId} for user ${userEmail}:`, error);
-        // Don't fail the webhook - we've already stored the notification
-      });
+      })
+        .then(async () => {
+          // After storing, try AI linking if auto-linking didn't work
+          // This runs in Next.js so it can use Next.js environment variables
+          try {
+            const linkingResponse = await fetch(
+              `${process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api')[0]}/api/fireflies/process-linking`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  email: userEmail,
+                  transcriptId: meetingId,
+                }),
+              }
+            );
+            if (!linkingResponse.ok) {
+              console.error(`AI linking failed for transcript ${meetingId}:`, await linkingResponse.text());
+            }
+          } catch (linkingError) {
+            console.error(`Failed to process AI linking for transcript ${meetingId}:`, linkingError);
+          }
+        })
+        .catch((error) => {
+          console.error(`Failed to fetch transcript ${meetingId} for user ${userEmail}:`, error);
+          // Don't fail the webhook - we've already stored the notification
+        });
     }
 
     return NextResponse.json({ ok: true });

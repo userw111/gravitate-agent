@@ -3,6 +3,15 @@ import { v } from "convex/values";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 
+type LinkingHistoryEntry = {
+  stage: string;
+  status: "success" | "no_match" | "error";
+  timestamp: number;
+  confidence?: number;
+  clientId?: Id<"clients">;
+  reason?: string;
+};
+
 export const getConfigForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
@@ -153,6 +162,27 @@ export const storeTranscript = mutation({
     duration: v.optional(v.number()),
     participants: v.optional(v.array(v.string())),
     clientId: v.optional(v.id("clients")),
+    linkingStatus: v.optional(
+      v.union(
+        v.literal("unlinked"),
+        v.literal("auto_linked"),
+        v.literal("ai_pending"),
+        v.literal("ai_linked"),
+        v.literal("needs_human"),
+        v.literal("manually_linked")
+      )
+    ),
+    lastLinkAttemptAt: v.optional(v.number()),
+    linkingHistoryEntry: v.optional(
+      v.object({
+        stage: v.string(),
+        status: v.union(v.literal("success"), v.literal("no_match"), v.literal("error")),
+        timestamp: v.number(),
+        confidence: v.optional(v.number()),
+        clientId: v.optional(v.id("clients")),
+        reason: v.optional(v.string()),
+      })
+    ),
   },
   handler: async (ctx: MutationCtx, args) => {
     // Check if transcript already exists
@@ -171,6 +201,9 @@ export const storeTranscript = mutation({
         participants?: string[];
         syncedAt: number;
         clientId?: Id<"clients">;
+        linkingStatus?: typeof args.linkingStatus;
+        lastLinkAttemptAt?: number;
+        linkingHistory?: LinkingHistoryEntry[];
       } = {
         title: args.title,
         transcript: args.transcript,
@@ -184,13 +217,40 @@ export const storeTranscript = mutation({
       if (args.clientId && !existing.clientId) {
         updateData.clientId = args.clientId;
       }
+      if (args.linkingStatus) {
+        updateData.linkingStatus = args.linkingStatus;
+      }
+      if (typeof args.lastLinkAttemptAt === "number") {
+        updateData.lastLinkAttemptAt = args.lastLinkAttemptAt;
+      }
+      if (args.linkingHistoryEntry) {
+        const history = Array.isArray(existing.linkingHistory)
+          ? (existing.linkingHistory as LinkingHistoryEntry[]).slice()
+          : [];
+        history.push(args.linkingHistoryEntry as LinkingHistoryEntry);
+        updateData.linkingHistory = history;
+      }
       
       await ctx.db.patch(existing._id, updateData);
       return existing._id;
     }
     
     // Insert new transcript
-    return await ctx.db.insert("fireflies_transcripts", {
+    const record: {
+      email: string;
+      transcriptId: string;
+      meetingId: string;
+      title: string;
+      transcript: string;
+      date: number;
+      duration?: number;
+      participants?: string[];
+      syncedAt: number;
+      clientId?: Id<"clients">;
+      linkingStatus?: typeof args.linkingStatus;
+      lastLinkAttemptAt?: number;
+      linkingHistory?: LinkingHistoryEntry[];
+    } = {
       email: args.email,
       transcriptId: args.transcriptId,
       meetingId: args.meetingId,
@@ -201,7 +261,95 @@ export const storeTranscript = mutation({
       participants: args.participants,
       syncedAt: Date.now(),
       clientId: args.clientId,
-    });
+    };
+
+    if (args.linkingStatus) {
+      record.linkingStatus = args.linkingStatus;
+    }
+    if (typeof args.lastLinkAttemptAt === "number") {
+      record.lastLinkAttemptAt = args.lastLinkAttemptAt;
+    }
+    if (args.linkingHistoryEntry) {
+      record.linkingHistory = [args.linkingHistoryEntry as LinkingHistoryEntry];
+    }
+    
+    return await ctx.db.insert("fireflies_transcripts", record);
+  },
+});
+
+export const recordLinkingAttempt = mutation({
+  args: {
+    transcriptId: v.string(),
+    linkingStatus: v.optional(
+      v.union(
+        v.literal("unlinked"),
+        v.literal("auto_linked"),
+        v.literal("ai_pending"),
+        v.literal("ai_linked"),
+        v.literal("needs_human"),
+        v.literal("manually_linked")
+      )
+    ),
+    lastLinkAttemptAt: v.optional(v.number()),
+    linkingHistoryEntry: v.optional(
+      v.object({
+        stage: v.string(),
+        status: v.union(v.literal("success"), v.literal("no_match"), v.literal("error")),
+        timestamp: v.number(),
+        confidence: v.optional(v.number()),
+        clientId: v.optional(v.id("clients")),
+        reason: v.optional(v.string()),
+      })
+    ),
+    clientId: v.optional(v.id("clients")),
+    overwriteClient: v.optional(v.boolean()),
+  },
+  handler: async (ctx: MutationCtx, args) => {
+    const transcript = await ctx.db
+      .query("fireflies_transcripts")
+      .withIndex("by_transcript_id", (q) => q.eq("transcriptId", args.transcriptId))
+      .first();
+
+    if (!transcript) {
+      throw new Error(`Transcript not found: ${args.transcriptId}`);
+    }
+
+    const update: {
+      clientId?: Id<"clients">;
+      linkingStatus?: typeof args.linkingStatus;
+      lastLinkAttemptAt?: number;
+      linkingHistory?: LinkingHistoryEntry[];
+    } = {};
+
+    if (
+      args.clientId &&
+      (!transcript.clientId || args.overwriteClient)
+    ) {
+      update.clientId = args.clientId;
+    }
+
+    if (args.linkingStatus) {
+      update.linkingStatus = args.linkingStatus;
+    }
+
+    if (typeof args.lastLinkAttemptAt === "number") {
+      update.lastLinkAttemptAt = args.lastLinkAttemptAt;
+    }
+
+    if (args.linkingHistoryEntry) {
+      const history = Array.isArray(transcript.linkingHistory)
+        ? (transcript.linkingHistory as LinkingHistoryEntry[]).slice()
+        : [];
+      history.push(args.linkingHistoryEntry as LinkingHistoryEntry);
+      update.linkingHistory = history;
+    }
+
+    if (Object.keys(update).length === 0) {
+      return transcript._id;
+    }
+
+    await ctx.db.patch(transcript._id, update);
+    return transcript._id;
   },
 });
 

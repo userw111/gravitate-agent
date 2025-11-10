@@ -1,267 +1,265 @@
 @import "tailwindcss";
 
+/* ======================================
+   🩵 GLOCAL NEUMORPHIC GLASS DESIGN
+   ====================================== */
+@layer base {
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --sidebar-background: 0 0% 98%;
-  --sidebar-foreground: 240 5.3% 26.1%;
-  --sidebar-primary: 240 5.9% 10%;
-  --sidebar-primary-foreground: 0 0% 98%;
-  --sidebar-accent: 240 4.8% 95.9%;
-  --sidebar-accent-foreground: 240 5.9% 10%;
-  --sidebar-border: 220 13% 91%;
-  --sidebar-ring: 217.2 91.2% 59.8%;
-}
+    --background: 220 16% 97%;
+    --foreground: 222 47% 11%;
+    --card: 220 16% 98%;
+    --card-foreground: 222 47% 11%;
+    --popover: 220 16% 98%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 250 80% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 250 30% 96%;
+    --secondary-foreground: 250 40% 25%;
+    --muted: 240 10% 92%;
+    --muted-foreground: 240 4% 46%;
+    --accent: 250 80% 95%;
+    --accent-foreground: 250 60% 25%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 12% 90%;
+    --input: 220 12% 90%;
+    --ring: 250 70% 65%;
+    --radius: 1rem;
 
-/* @theme is a Tailwind CSS v4 feature - CSS linter doesn't recognize it */
-/* stylelint-disable-next-line at-rule-no-unknown */
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --color-sidebar: hsl(var(--sidebar-background));
-  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
-  --color-sidebar-primary: hsl(var(--sidebar-primary));
-  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
-  --color-sidebar-accent: hsl(var(--sidebar-accent));
-  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
-  --color-sidebar-border: hsl(var(--sidebar-border));
-  --color-sidebar-ring: hsl(var(--sidebar-ring));
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --sidebar-background: 240 7% 18%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-background: 220 16% 97%;
+    --sidebar-foreground: 240 8% 20%;
+    --sidebar-primary: 250 80% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 6% 22%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 6% 30%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-accent: 250 70% 96%;
+    --sidebar-accent-foreground: 250 40% 20%;
+    --sidebar-border: 240 6% 90%;
+    --sidebar-ring: 250 80% 60%;
+
+    --glass-bg: hsla(0, 0%, 100%, 0.6);
+    --glass-border: hsla(0, 0%, 100%, 0.3);
+    --glass-shadow-light: rgba(255, 255, 255, 0.6);
+    --glass-shadow-dark: rgba(0, 0, 0, 0.05);
+    --blur: 20px;
+}
+
+  .dark,
+  :root[data-theme="dark"] {
+    --background: 222 47% 7%;
+    --foreground: 210 17% 96%;
+    --card: 222 47% 9%;
+    --card-foreground: 210 17% 96%;
+    --popover: 222 47% 9%;
+    --popover-foreground: 210 17% 96%;
+    --primary: 260 100% 70%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 8% 18%;
+    --secondary-foreground: 220 10% 90%;
+    --muted: 220 8% 22%;
+    --muted-foreground: 220 10% 70%;
+    --accent: 250 25% 18%;
+    --accent-foreground: 210 17% 98%;
+    --destructive: 0 80% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 10% 20%;
+    --input: 220 10% 20%;
+    --ring: 260 100% 70%;
+
+    --sidebar-background: 240 8% 12%;
+    --sidebar-foreground: 240 8% 94%;
+    --sidebar-primary: 260 100% 70%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 10% 20%;
+    --sidebar-accent-foreground: 240 10% 94%;
+    --sidebar-border: 240 10% 25%;
+    --sidebar-ring: 260 100% 70%;
+
+    --glass-bg: hsla(220, 16%, 20%, 0.4);
+    --glass-border: hsla(0, 0%, 100%, 0.08);
+    --glass-shadow-light: rgba(255, 255, 255, 0.04);
+    --glass-shadow-dark: rgba(0, 0, 0, 0.6);
+    --blur: 25px;
   }
 }
 
-/* Explicit theme override via data-theme attribute (takes precedence) */
-:root[data-theme="light"] {
-  --background: #ffffff;
-  --foreground: #171717;
-  --sidebar-background: 0 0% 98%;
-  --sidebar-foreground: 240 5.3% 26.1%;
-  --sidebar-primary: 240 5.9% 10%;
-  --sidebar-primary-foreground: 0 0% 98%;
-  --sidebar-accent: 240 4.8% 95.9%;
-  --sidebar-accent-foreground: 240 5.9% 10%;
-  --sidebar-border: 220 13% 91%;
-  --sidebar-ring: 217.2 91.2% 59.8%;
+/* ======================================
+   🎨 Tailwind Theme Bindings
+   ====================================== */
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-card: hsl(var(--card));
+  --color-border: hsl(var(--border));
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
 }
 
-:root[data-theme="dark"] {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-  --sidebar-background: 240 7% 18%;
-  --sidebar-foreground: 240 4.8% 95.9%;
-  --sidebar-primary: 224.3 76.3% 48%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 240 6% 22%;
-  --sidebar-accent-foreground: 240 4.8% 95.9%;
-  --sidebar-border: 240 6% 30%;
-  --sidebar-ring: 217.2 91.2% 59.8%;
+/* ======================================
+   🧭 Base Style Enhancements
+   ====================================== */
+@layer base {
+  * {
+    @apply border-border transition-all duration-300 ease-out;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+    @apply bg-background text-foreground;
   font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: radial-gradient(circle at 50% 0%, hsl(var(--primary) / 0.07), transparent 70%) fixed;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-* {
-  -webkit-tap-highlight-color: transparent;
-}
-
-input, button {
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-@keyframes blur-focus {
-  from {
-    opacity: 0;
-    filter: blur(20px);
-    transform: translateY(10px);
+  h1, h2, h3 {
+    @apply font-semibold tracking-tight;
   }
-  to {
-    opacity: 1;
-    filter: blur(0);
-    transform: translateY(0);
+
+  a {
+    color: hsl(var(--primary));
+    transition: color 0.2s ease, text-shadow 0.3s ease;
+}
+
+  a:hover {
+    color: hsl(var(--primary) / 0.85);
+    text-shadow: 0 0 6px hsl(var(--primary) / 0.6);
   }
 }
 
-@keyframes rotate-fade {
-  from {
-    opacity: 0;
-    transform: rotate(-5deg) scale(0.9);
+/* ======================================
+   🌫 Glassmorphism / Neumorphism Effects
+   ====================================== */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow:
+    8px 8px 16px var(--glass-shadow-dark),
+    -8px -8px 16px var(--glass-shadow-light);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
   }
-  to {
-    opacity: 1;
-    transform: rotate(0deg) scale(1);
+
+.glass:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    10px 10px 20px var(--glass-shadow-dark),
+    -10px -10px 20px var(--glass-shadow-light);
   }
+
+/* For card-like components */
+.card-glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow:
+    8px 8px 16px var(--glass-shadow-dark),
+    -8px -8px 16px var(--glass-shadow-light);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  padding: 1.5rem;
 }
 
-@keyframes elastic-bounce {
-  0% {
-    opacity: 0;
-    transform: translateY(20px) scale(0.8);
-  }
-  50% {
-    transform: translateY(-5px) scale(1.05);
-  }
-  70% {
-    transform: translateY(2px) scale(0.98);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+/* ======================================
+   🧩 Buttons (Soft Neumorphic)
+   ====================================== */
+.btn {
+  background: var(--glass-bg);
+  border-radius: var(--radius);
+  border: 1px solid var(--glass-border);
+  color: hsl(var(--foreground));
+  padding: 0.75rem 1.5rem;
+  font-weight: 500;
+  backdrop-filter: blur(var(--blur));
+  box-shadow:
+    4px 4px 10px var(--glass-shadow-dark),
+    -4px -4px 10px var(--glass-shadow-light);
+  transition: all 0.25s ease;
 }
 
-@keyframes fade-in-simple {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    6px 6px 14px var(--glass-shadow-dark),
+    -6px -6px 14px var(--glass-shadow-light);
 }
 
-.animate-blur-focus {
-  animation: blur-focus 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-.animate-rotate-fade {
-  animation: rotate-fade 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-.animate-elastic-bounce {
-  animation: elastic-bounce 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-.animate-fade-in-simple {
-  animation: fade-in-simple 0.2s ease-out forwards;
-}
-
-.delay-50 {
-  animation-delay: 0.05s;
-  opacity: 0;
-}
-
-.delay-100 {
-  animation-delay: 0.1s;
-  opacity: 0;
-}
-
-/* Cursor states */
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  cursor: pointer;
-}
-
-button:active {
-  cursor: grabbing;
-}
-
-/* Syntax highlighting for code blocks */
-@import "highlight.js/styles/github-dark.css" (prefers-color-scheme: dark);
-@import "highlight.js/styles/github.css" (prefers-color-scheme: light);
-
-/* Override highlight.js styles to match our theme */
-.hljs {
-  background: hsl(var(--foreground) / 0.1) !important;
-  color: hsl(var(--foreground)) !important;
-  padding: 1rem;
-  border-radius: 0.5rem;
-  border: 1px solid hsl(var(--foreground) / 0.2);
-}
-
-/* Dark mode overrides */
-@media (prefers-color-scheme: dark) {
-  .hljs {
-    background: hsl(var(--foreground) / 0.1) !important;
-    color: hsl(var(--foreground)) !important;
+.btn-primary {
+  background: linear-gradient(145deg, hsl(var(--primary) / 0.85), hsl(var(--primary)));
+  color: hsl(var(--primary-foreground));
+  box-shadow: 0 4px 20px hsl(var(--primary) / 0.4);
   }
   
-  .hljs-comment,
-  .hljs-quote {
-    color: hsl(var(--foreground) / 0.6);
-  }
-  
-  .hljs-keyword,
-  .hljs-selector-tag,
-  .hljs-built_in,
-  .hljs-name {
-    color: #c267ce;
-  }
-  
-  .hljs-string,
-  .hljs-title,
-  .hljs-section,
-  .hljs-attribute {
-    color: #56c2c2;
-  }
-  
-  .hljs-number,
-  .hljs-literal {
-    color: #b8a6ff;
-  }
-  
-  .hljs-function,
-  .hljs-class .hljs-title {
-    color: #94c4ff;
-  }
+.btn-primary:hover {
+  box-shadow: 0 6px 24px hsl(var(--primary) / 0.5);
+  transform: translateY(-2px);
 }
 
-/* Light mode overrides */
-@media (prefers-color-scheme: light) {
-  .hljs {
-    background: hsl(var(--foreground) / 0.05) !important;
-    color: hsl(var(--foreground)) !important;
+/* ======================================
+   ✨ Smooth Animations
+   ====================================== */
+@keyframes glass-fade {
+  from { opacity: 0; transform: translateY(10px) scale(0.95); filter: blur(10px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
   }
+  
+.animate-glass-fade {
+  animation: glass-fade 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
-/* Markdown content styles */
+/* ======================================
+   📚 Markdown & Code Blocks
+   ====================================== */
 .markdown-content {
-  line-height: 1.6;
+  line-height: 1.8;
+  color: hsl(var(--foreground));
+  max-width: 75ch;
+  }
+
+.markdown-content h1,
+.markdown-content h2 {
+  @apply font-semibold text-primary mt-10 mb-4;
+}
+
+.markdown-content a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .markdown-content .inline-code {
-  background: hsl(var(--foreground) / 0.1);
-  padding: 0.125rem 0.25rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  background: hsl(var(--foreground) / 0.08);
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.4rem;
+  font-size: 0.85rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .markdown-content .code-block {
-  background: hsl(var(--foreground) / 0.1);
-  border: 1px solid hsl(var(--foreground) / 0.2);
-  border-radius: 0.5rem;
-  padding: 1rem;
-  overflow-x: auto;
-  margin: 0.5rem 0;
+  @apply rounded-xl border border-border overflow-x-auto my-4;
+  background: var(--glass-bg);
+  backdrop-filter: blur(calc(var(--blur) * 0.6));
+  padding: 1.25rem;
+  box-shadow: inset 0 0 25px hsl(var(--foreground) / 0.05);
 }
 
 .markdown-content .code-block code {
   background: transparent;
-  padding: 0;
-  font-size: 0.875rem;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  color: hsl(var(--foreground));
+  font-size: 0.9rem;
 }
 
+/* ======================================
+   🌓 Highlight.js Overrides
+   ====================================== */
+@import "highlight.js/styles/github-dark.css" (prefers-color-scheme: dark);
+@import "highlight.js/styles/github.css" (prefers-color-scheme: light);
+
+.hljs {
+  background: transparent !important;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  font-size: 0.9rem;
+}

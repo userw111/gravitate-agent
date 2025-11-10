@@ -56,7 +56,21 @@ WORKOS_API_KEY=sk_your_api_key_here
 WORKOS_CLIENT_ID=client_your_client_id_here
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 NODE_ENV=development
+OPENROUTER_API_KEY=sk-or-v1-your_openrouter_key_here
 ```
+
+**Note:** AI linking and Telegram notifications run in Next.js API routes. 
+
+**For local development:** Since this project uses OpenNext/Cloudflare Workers, you may need to add these variables to **both** `.env.local` and `.dev.vars`:
+- `OPENROUTER_API_KEY`
+- `TELEGRAM_BOT_TOKEN` (if using Telegram)
+- `TELEGRAM_CHAT_ID` (if using Telegram)
+
+The `.dev.vars` file is used by Wrangler for Cloudflare Workers runtime, while `.env.local` is used by Next.js. Check your server logs - if you see "Using vars defined in .dev.vars", make sure your variables are there too.
+
+You do NOT need to set `OPENROUTER_API_KEY` or Telegram variables in Convex Dashboard.
+
+However, if you're using Convex Actions that need environment variables (like Fireflies API calls), you may need to set those in the Convex Dashboard → Settings → Environment Variables.
 
 ### 5. Run the Development Server
 

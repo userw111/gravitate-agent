@@ -103,6 +103,29 @@ export default defineSchema({
     syncedAt: v.number(),
     // Link to client
     clientId: v.optional(v.id("clients")),
+    linkingStatus: v.optional(
+      v.union(
+        v.literal("unlinked"),
+        v.literal("auto_linked"),
+        v.literal("ai_pending"),
+        v.literal("ai_linked"),
+        v.literal("needs_human"),
+        v.literal("manually_linked")
+      )
+    ),
+    lastLinkAttemptAt: v.optional(v.number()),
+    linkingHistory: v.optional(
+      v.array(
+        v.object({
+          stage: v.string(),
+          status: v.union(v.literal("success"), v.literal("no_match"), v.literal("error")),
+          timestamp: v.number(),
+          confidence: v.optional(v.number()),
+          clientId: v.optional(v.id("clients")),
+          reason: v.optional(v.string()),
+        })
+      )
+    ),
   })
     .index("by_email", ["email"])
     .index("by_email_synced", ["email", "syncedAt"])
