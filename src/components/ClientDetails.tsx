@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import * as React from "react";
 import type { Id } from "../../convex/_generated/dataModel";
 import UnlinkedTranscripts from "./UnlinkedTranscripts";
+import ScriptTabContent from "./ScriptTabContent";
 import { Pencil, X, Plus } from "lucide-react";
 import { Button } from "./ui/button";
 import {
@@ -941,6 +942,13 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
               </Card>
             )}
 
+            {/* Scripts Tab */}
+            {activeTab === "scripts" && (
+              <div>
+                <ScriptTabContent />
+              </div>
+            )}
+
             {/* Transcripts Tab */}
             {activeTab === "transcripts" && (
               <div>
@@ -953,7 +961,7 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
             )}
 
             {/* Other tabs placeholder */}
-            {activeTab !== "overview" && activeTab !== "transcripts" && activeTab !== "notes" && (
+            {activeTab !== "overview" && activeTab !== "transcripts" && activeTab !== "notes" && activeTab !== "scripts" && (
               <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
                 <CardContent className="py-12 text-center">
                   <p className="text-sm text-foreground/60 font-light">

@@ -22,7 +22,7 @@ WORKFLOW FOR LINKING UNLINKED TRANSCRIPTS:
 2. Get all clients: client_lookup with empty query
 3. Carefully analyze possible matches. Consider:
    - Exact participant email to client businessEmail matches (high confidence)
-   - Participant email domains that exactly match the client’s domain (high confidence)
+   - Participant email domains that exactly match the client's domain (high confidence)
    - Participant email domains whose core name (strip punctuation/TLD) aligns with a client business name (medium confidence)
    - Transcript titles that closely match client names (medium confidence)
    - Keep track of match confidence and be explicit about your reasoning.
@@ -38,6 +38,18 @@ When users ask to:
 - "Create/update/delete" → use database_operation with appropriate operation
 
 Always be helpful, concise, and focus on providing actionable information. When linking transcripts, always show the plan first before executing.`;
+
+// System prompt for script editing
+const SCRIPT_EDITOR_PROMPT = `You are an AI assistant helping to edit a client script. The user will provide instructions on how to modify the script. 
+
+When the user asks you to edit the script, use the update_document tool to apply the changes. The tool accepts the updated HTML content of the entire document.
+
+Important guidelines:
+- Preserve the overall structure and formatting of the script
+- Make only the changes requested by the user
+- Maintain HTML formatting (use proper HTML tags: <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <a>, etc.)
+- If the user asks for clarification or makes ambiguous requests, ask for clarification before making changes
+- Always return the complete updated document as HTML, not just the changed portions`;
 
 // Tool definitions
 const TOOLS = [
@@ -122,6 +134,25 @@ const TOOLS = [
   },
 ];
 
+// Tool for document editing
+const UPDATE_DOCUMENT_TOOL = {
+  type: "function",
+  function: {
+    name: "update_document",
+    description: "Update the script document with new content. Use this when the user asks you to edit, modify, or change the script. Provide the complete updated HTML content.",
+    parameters: {
+      type: "object",
+      properties: {
+        content: {
+          type: "string",
+          description: "The complete updated HTML content of the script document. Use proper HTML tags like <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <a>, etc.",
+        },
+      },
+      required: ["content"],
+    },
+  },
+};
+
 export async function POST(request: Request) {
   try {
     const user = await getCurrentUser();
@@ -136,8 +167,11 @@ export async function POST(request: Request) {
       messages: Array<{ role: string; content: string }>;
       model?: string;
       thinkingEffort?: "low" | "medium" | "high";
+      documentContext?: {
+        content: string;
+      };
     };
-    const { messages, model, thinkingEffort = "high" } = body;
+    const { messages, model, thinkingEffort = "high", documentContext } = body;
     if (!Array.isArray(messages)) {
       return new Response(JSON.stringify({ error: "Invalid messages" }), {
         status: 400,
@@ -161,10 +195,27 @@ export async function POST(request: Request) {
     // Check if model supports reasoning (GPT-5 or GPT-OSS-120B)
     const supportsReasoning = model?.includes("gpt-5") || model?.includes("gpt-oss-120b");
     
+    // Determine system prompt and tools based on context
+    const isScriptEditor = !!documentContext;
+    const systemPrompt = isScriptEditor ? SCRIPT_EDITOR_PROMPT : SYSTEM_PROMPT;
+    const availableTools = isScriptEditor ? [...TOOLS, UPDATE_DOCUMENT_TOOL] : TOOLS;
+    
     // Prepare messages with system prompt if not already present
-    const messagesWithSystem = messages.some((m) => m.role === "system")
+    let messagesWithSystem = messages.some((m) => m.role === "system")
       ? messages
-      : [{ role: "system", content: SYSTEM_PROMPT }, ...messages];
+      : [{ role: "system", content: systemPrompt }, ...messages];
+    
+    // Add document context to initial messages if provided
+    if (documentContext && !messagesWithSystem.some((m) => m.role === "system" && m.content.includes("Current script content"))) {
+      messagesWithSystem = [
+        ...messagesWithSystem.slice(0, 1), // Keep system prompt
+        {
+          role: "user",
+          content: `Current script content (HTML):\n\n${documentContext.content}\n\nPlease help me edit this script based on my requests. Return the updated content as HTML.`,
+        },
+        ...messagesWithSystem.slice(1), // Rest of messages
+      ];
+    }
     
     const openRouterRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -177,7 +228,7 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         model: model || "openrouter/auto",
         messages: messagesWithSystem,
-        tools: TOOLS,
+        tools: availableTools,
         tool_choice: "auto", // Let the model decide when to use tools
         stream: true,
         ...(supportsReasoning && {
@@ -203,6 +254,19 @@ export async function POST(request: Request) {
       arguments: string;
     }): Promise<{ result: unknown; error?: string }> {
       try {
+        if (toolCall.name === "update_document") {
+          const args = JSON.parse(toolCall.arguments);
+          const updatedContent = typeof args.content === "string" ? args.content : "";
+          
+          // Return the updated content so the client can update the document
+          return {
+            result: {
+              updatedContent,
+              success: true,
+            },
+          };
+        }
+
         if (toolCall.name === "client_lookup") {
           const args = JSON.parse(toolCall.arguments);
           const queryArg = typeof args.query === "string" ? args.query : undefined;
@@ -552,7 +616,7 @@ export async function POST(request: Request) {
               ...toolMessages,
               ...toolResultMessages,
             ],
-            tools: TOOLS,
+            tools: availableTools,
             tool_choice: "auto",
             stream: true,
             ...(supportsReasoning && {

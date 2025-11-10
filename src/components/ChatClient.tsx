@@ -28,12 +28,24 @@ type ChatClientProps = {
   model?: string;
   onModelChange?: (model: string) => void;
   thinkingEffort?: "low" | "medium" | "high";
+  apiEndpoint?: string;
+  extraPayload?: Record<string, unknown>;
+  onToolResult?: (toolCall: ToolCall) => void;
+  storageKeyPrefix?: string;
+  emptyStateTitle?: string;
+  emptyStateDescription?: string;
 };
 
 export default function ChatClient({
   model: modelProp,
   onModelChange,
   thinkingEffort = "high",
+  apiEndpoint = "/api/chat",
+  extraPayload,
+  onToolResult,
+  storageKeyPrefix = "chat",
+  emptyStateTitle = "AI Chat",
+  emptyStateDescription = "Start a conversation to get started",
 }: ChatClientProps = {}) {
   function ThinkingBubble({ text, animate = false }: { text: string; animate?: boolean }) {
     const [expanded, setExpanded] = React.useState(false);
@@ -127,15 +139,15 @@ export default function ChatClient({
   // Draft persistence
   React.useEffect(() => {
     try {
-      const saved = localStorage.getItem("chat:inputDraft");
+      const saved = localStorage.getItem(`${storageKeyPrefix}:inputDraft`);
       if (saved) setInput(saved);
     } catch {}
-  }, []);
+  }, [storageKeyPrefix]);
   React.useEffect(() => {
     try {
-      localStorage.setItem("chat:inputDraft", input);
+      localStorage.setItem(`${storageKeyPrefix}:inputDraft`, input);
     } catch {}
-  }, [input]);
+  }, [input, storageKeyPrefix]);
 
   // Rotate helpful placeholder until user types
   React.useEffect(() => {
@@ -182,10 +194,15 @@ export default function ChatClient({
     let accumulatedReasoning = "";
 
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch(apiEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages, model, thinkingEffort }),
+        body: JSON.stringify({ 
+          messages: nextMessages, 
+          model, 
+          thinkingEffort,
+          ...extraPayload,
+        }),
         signal: controller.signal,
       });
 
@@ -296,22 +313,30 @@ export default function ChatClient({
                   (typeof data.toolName === "string" && data.toolName) ||
                   (callIndex >= 0 ? currentToolCalls[callIndex].name : "client_lookup");
 
+                let updatedToolCall: ToolCall;
                 if (callIndex >= 0) {
-                  currentToolCalls[callIndex] = {
+                  updatedToolCall = {
                     ...currentToolCalls[callIndex],
                     status,
                     result: data.result,
                     error: data.error,
                   };
+                  currentToolCalls[callIndex] = updatedToolCall;
                 } else {
-                  currentToolCalls.push({
+                  updatedToolCall = {
                     id: data.toolCallId,
                     name: toolName,
                     arguments: "",
                     status,
                     result: data.result,
                     error: data.error,
-                  });
+                  };
+                  currentToolCalls.push(updatedToolCall);
+                }
+
+                // Call onToolResult callback if provided
+                if (onToolResult) {
+                  onToolResult(updatedToolCall);
                 }
 
                 updated[assistantMessageId] = {
@@ -439,9 +464,9 @@ export default function ChatClient({
         <div className="w-full max-w-3xl">
           {/* Welcome message */}
           <div className="mb-8 text-center">
-            <h1 className="text-3xl font-light tracking-tight mb-2">AI Chat</h1>
+            <h1 className="text-3xl font-light tracking-tight mb-2">{emptyStateTitle}</h1>
             <p className="text-sm text-foreground/60">
-              Start a conversation to get started
+              {emptyStateDescription}
             </p>
           </div>
 
