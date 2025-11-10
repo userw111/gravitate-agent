@@ -110,8 +110,8 @@ export default function UnlinkedResponses({ email }: UnlinkedResponsesProps) {
   const handleSubmitCreate = async () => {
     if (!selectedResponse) return;
     
-    if (!formData.businessEmail || !formData.businessName) {
-      alert("Business email and name are required");
+    if (!formData.businessName) {
+      alert("Business name is required");
       return;
     }
 
@@ -119,7 +119,7 @@ export default function UnlinkedResponses({ email }: UnlinkedResponsesProps) {
     try {
       const clientId = await createClient({
         ownerEmail: email,
-        businessEmail: formData.businessEmail.toLowerCase().trim(),
+        businessEmail: formData.businessEmail.trim() ? formData.businessEmail.toLowerCase().trim() : undefined,
         businessName: formData.businessName,
         contactFirstName: formData.contactFirstName || undefined,
         contactLastName: formData.contactLastName || undefined,
@@ -158,13 +158,13 @@ export default function UnlinkedResponses({ email }: UnlinkedResponsesProps) {
         try {
           const extractedData = extractTypeformData(response.payload as Parameters<typeof extractTypeformData>[0]);
           
-          // Generate a placeholder email if not available
-          const businessEmail = extractedData.businessEmail || `pending-${response.responseId}@placeholder.local`;
+          // businessEmail is now optional
+          const businessEmail = extractedData.businessEmail;
           const businessName = extractedData.businessName || "Unnamed Business";
           
           const clientId = await createClient({
             ownerEmail: email,
-            businessEmail: businessEmail.toLowerCase().trim(),
+            businessEmail: businessEmail ? businessEmail.toLowerCase().trim() : undefined,
             businessName: businessName,
             contactFirstName: extractedData.contactFirstName || undefined,
             contactLastName: extractedData.contactLastName || undefined,
@@ -421,7 +421,7 @@ export default function UnlinkedResponses({ email }: UnlinkedResponsesProps) {
             </button>
             <button
               onClick={handleSubmitCreate}
-              disabled={creating !== null || !formData.businessEmail || !formData.businessName}
+              disabled={creating !== null || !formData.businessName}
               className="px-4 py-2 text-sm rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 disabled:opacity-50 transition-all duration-150"
             >
               {creating ? "Creating..." : "Create Client"}

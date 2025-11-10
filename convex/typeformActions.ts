@@ -498,12 +498,12 @@ export const syncTypeformResponses = action({
               }
             }
             
-            // Create/update client if we have business email
-            if (businessEmail && businessName) {
+            // Create/update client if we have business name (businessEmail is optional)
+            if (businessName) {
               try {
                 await ctx.runMutation(api.clients.upsertClientFromTypeform, {
                   ownerEmail: args.email,
-                  businessEmail: businessEmail.toLowerCase().trim(),
+                  businessEmail: businessEmail ? businessEmail.toLowerCase().trim() : undefined,
                   businessName: businessName,
                   contactFirstName: firstName || undefined,
                   contactLastName: lastName || undefined,
@@ -512,7 +512,7 @@ export const syncTypeformResponses = action({
                 });
               } catch (clientError) {
                 // Log but don't fail the sync if client creation fails
-                console.error(`Failed to create/update client for ${businessEmail}:`, clientError);
+                console.error(`Failed to create/update client for ${businessEmail || businessName}:`, clientError);
               }
             }
             

@@ -250,12 +250,12 @@ export async function POST(request: Request) {
                 }
               }
               
-              // Create/update client if we have business email and name
-              if (businessEmail && businessName) {
+              // Create/update client if we have business name (businessEmail is optional)
+              if (businessName) {
                 try {
                   await convex.mutation(api.clients.upsertClientFromTypeform, {
                     ownerEmail: userEmail,
-                    businessEmail: businessEmail.toLowerCase().trim(),
+                    businessEmail: businessEmail ? businessEmail.toLowerCase().trim() : undefined,
                     businessName: businessName,
                     contactFirstName: firstName || undefined,
                     contactLastName: lastName || undefined,
@@ -264,7 +264,7 @@ export async function POST(request: Request) {
                   });
                 } catch (clientError) {
                   // Log but don't fail the webhook if client creation fails
-                  console.error(`Failed to create/update client for ${businessEmail}:`, clientError);
+                  console.error(`Failed to create/update client for ${businessEmail || businessName}:`, clientError);
                 }
               }
             }

@@ -9,6 +9,7 @@
  */
 
 import type * as clients from "../clients.js";
+import type * as database from "../database.js";
 import type * as fireflies from "../fireflies.js";
 import type * as firefliesActions from "../firefliesActions.js";
 import type * as typeform from "../typeform.js";
@@ -31,6 +32,7 @@ import type {
  */
 declare const fullApi: ApiFromModules<{
   clients: typeof clients;
+  database: typeof database;
   fireflies: typeof fireflies;
   firefliesActions: typeof firefliesActions;
   typeform: typeof typeform;

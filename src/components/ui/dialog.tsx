@@ -43,7 +43,7 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
       {/* Dialog */}
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div
-          className="relative w-full max-w-md rounded-lg border border-foreground/10 bg-background shadow-lg animate-fade-in-simple"
+          className="relative w-full rounded-lg border border-foreground/10 bg-background shadow-lg animate-fade-in-simple"
           onClick={(e) => e.stopPropagation()}
         >
           {children}
@@ -64,10 +64,11 @@ export function DialogContent({ children, className }: DialogContentProps) {
 
 type DialogHeaderProps = {
   children: React.ReactNode;
+  className?: string;
 };
 
-export function DialogHeader({ children }: DialogHeaderProps) {
-  return <div className="p-6 pb-4">{children}</div>;
+export function DialogHeader({ children, className }: DialogHeaderProps) {
+  return <div className={className || "p-6 pb-4"}>{children}</div>;
 }
 
 type DialogTitleProps = {

@@ -68,7 +68,7 @@ export default defineSchema({
     ownerEmail: v.string(),
     
     // Business identification (from Typeform)
-    businessEmail: v.string(), // Primary identifier - email from onboarding
+    businessEmail: v.optional(v.string()), // Primary identifier - email from onboarding
     businessName: v.string(),
     contactFirstName: v.optional(v.string()),
     contactLastName: v.optional(v.string()),

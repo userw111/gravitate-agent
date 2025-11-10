@@ -20,6 +20,8 @@ export const getAllClientsForOwner = query({
 export const getClientByBusinessEmail = query({
   args: { ownerEmail: v.string(), businessEmail: v.string() },
   handler: async (ctx: QueryCtx, args) => {
+    // Note: businessEmail is now optional, so this query may not work for all cases
+    // Consider using searchClients instead if businessEmail might be null
     return await ctx.db
       .query("clients")
       .withIndex("by_owner_business_email", (q) =>
@@ -57,7 +59,7 @@ export const getClientByOnboardingResponseId = query({
 export const upsertClientFromTypeform = mutation({
   args: {
     ownerEmail: v.string(),
-    businessEmail: v.string(),
+    businessEmail: v.optional(v.string()),
     businessName: v.string(),
     contactFirstName: v.optional(v.string()),
     contactLastName: v.optional(v.string()),
@@ -65,12 +67,16 @@ export const upsertClientFromTypeform = mutation({
     targetRevenue: v.optional(v.number()),
   },
   handler: async (ctx: MutationCtx, args) => {
-    const existing = await ctx.db
-      .query("clients")
-      .withIndex("by_owner_business_email", (q) =>
-        q.eq("ownerEmail", args.ownerEmail).eq("businessEmail", args.businessEmail)
-      )
-      .unique();
+    // If businessEmail is provided, try to find existing client by it
+    let existing = null;
+    if (args.businessEmail) {
+      existing = await ctx.db
+        .query("clients")
+        .withIndex("by_owner_business_email", (q) =>
+          q.eq("ownerEmail", args.ownerEmail).eq("businessEmail", args.businessEmail)
+        )
+        .unique();
+    }
 
     const now = Date.now();
     const updateData: {
@@ -211,6 +217,70 @@ export const linkResponseToClient = mutation({
     });
 
     return args.clientId;
+  },
+});
+
+/**
+ * Search clients by name, email, or business name
+ * Used by AI chat tool for looking up client information
+ */
+export const searchClients = query({
+  args: {
+    ownerEmail: v.string(),
+    query: v.optional(v.string()), // Search term (name, email, business name)
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx: QueryCtx, args) => {
+    const maxLimit = 200;
+    const requestedLimit = args.limit ?? (args.query ? 10 : 100);
+    const limit = Math.min(Math.max(requestedLimit, 1), maxLimit);
+
+    const rawQuery = (args.query ?? "").trim();
+    const statusMatch = rawQuery.match(/status:(active|paused|inactive)/i);
+    const statusFilter = statusMatch ? (statusMatch[1].toLowerCase() as "active" | "paused" | "inactive") : null;
+    const cleanedQuery = statusMatch ? rawQuery.replace(statusMatch[0], "").trim() : rawQuery;
+    const searchTerm = cleanedQuery.toLowerCase();
+
+    // Get all clients for the owner
+    const allClients = await ctx.db
+      .query("clients")
+      .withIndex("by_owner", (q) => q.eq("ownerEmail", args.ownerEmail))
+      .collect();
+
+    // Filter clients that match the search term and status (if provided)
+    const matchingClients = allClients
+      .filter((client) => {
+        const matchesStatus =
+          !statusFilter ||
+          (client.status ? client.status.toLowerCase() === statusFilter : statusFilter === "inactive");
+        if (!matchesStatus) return false;
+
+        if (!searchTerm) {
+          return true;
+        }
+
+        const businessName = client.businessName?.toLowerCase() || "";
+        const businessEmail = client.businessEmail?.toLowerCase() || "";
+        const contactFirstName = client.contactFirstName?.toLowerCase() || "";
+        const contactLastName = client.contactLastName?.toLowerCase() || "";
+        const fullName = `${contactFirstName} ${contactLastName}`.trim();
+        
+        return (
+          businessName.includes(searchTerm) ||
+          businessEmail.includes(searchTerm) ||
+          fullName.includes(searchTerm) ||
+          contactFirstName.includes(searchTerm) ||
+          contactLastName.includes(searchTerm)
+        );
+      })
+      .sort((a, b) => {
+        const aTimestamp = a.updatedAt ?? a.createdAt ?? 0;
+        const bTimestamp = b.updatedAt ?? b.createdAt ?? 0;
+        return bTimestamp - aTimestamp;
+      })
+      .slice(0, limit);
+
+    return matchingClients;
   },
 });
 
