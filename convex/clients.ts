@@ -322,3 +322,96 @@ export const searchClients = query({
   },
 });
 
+/**
+ * Update client information
+ */
+export const updateClient = mutation({
+  args: {
+    clientId: v.id("clients"),
+    businessName: v.optional(v.string()),
+    businessEmail: v.optional(v.string()),
+    businessEmails: v.optional(v.array(v.string())),
+    contactFirstName: v.optional(v.string()),
+    contactLastName: v.optional(v.string()),
+    targetRevenue: v.optional(v.number()),
+    status: v.optional(v.union(
+      v.literal("active"),
+      v.literal("paused"),
+      v.literal("inactive")
+    )),
+    notes: v.optional(v.string()),
+  },
+  handler: async (ctx: MutationCtx, args) => {
+    console.log("[updateClient] Mutation called with args:", JSON.stringify(args, null, 2));
+    
+    const client = await ctx.db.get(args.clientId);
+    if (!client) {
+      throw new Error(`Client not found: ${args.clientId}`);
+    }
+
+    console.log("[updateClient] Current client state:", {
+      businessEmail: client.businessEmail,
+      businessEmails: client.businessEmails,
+    });
+
+    const updateData: {
+      businessName?: string;
+      businessEmail?: string;
+      businessEmails?: string[];
+      contactFirstName?: string;
+      contactLastName?: string;
+      targetRevenue?: number;
+      status?: "active" | "paused" | "inactive";
+      notes?: string;
+      updatedAt: number;
+    } = {
+      updatedAt: Date.now(),
+    };
+
+    if (args.businessName !== undefined) {
+      updateData.businessName = args.businessName;
+    }
+    if (args.businessEmail !== undefined) {
+      updateData.businessEmail = args.businessEmail.toLowerCase().trim() || undefined;
+    }
+    if (args.businessEmails !== undefined) {
+      console.log("[updateClient] Processing businessEmails:", args.businessEmails);
+      // Filter out empty strings and normalize emails
+      const normalizedEmails = args.businessEmails.map(email => email.toLowerCase().trim()).filter(Boolean);
+      console.log("[updateClient] Normalized emails:", normalizedEmails);
+      // Always save the array, even if empty (to allow clearing emails)
+      // Only set to undefined if we want to remove the field entirely
+      updateData.businessEmails = normalizedEmails;
+      console.log("[updateClient] Setting businessEmails to:", updateData.businessEmails);
+    }
+    if (args.contactFirstName !== undefined) {
+      updateData.contactFirstName = args.contactFirstName || undefined;
+    }
+    if (args.contactLastName !== undefined) {
+      updateData.contactLastName = args.contactLastName || undefined;
+    }
+    if (args.targetRevenue !== undefined) {
+      updateData.targetRevenue = args.targetRevenue || undefined;
+    }
+    if (args.status !== undefined) {
+      updateData.status = args.status;
+    }
+    if (args.notes !== undefined) {
+      updateData.notes = args.notes || undefined;
+    }
+
+    console.log("[updateClient] Final updateData:", JSON.stringify(updateData, null, 2));
+
+    await ctx.db.patch(args.clientId, updateData);
+
+    // Verify the update
+    const updatedClient = await ctx.db.get(args.clientId);
+    console.log("[updateClient] Client after update:", {
+      businessEmail: updatedClient?.businessEmail,
+      businessEmails: updatedClient?.businessEmails,
+    });
+
+    return args.clientId;
+  },
+});
+

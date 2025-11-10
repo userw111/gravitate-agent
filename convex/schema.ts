@@ -69,6 +69,7 @@ export default defineSchema({
     
     // Business identification (from Typeform)
     businessEmail: v.optional(v.string()), // Primary identifier - email from onboarding
+    businessEmails: v.optional(v.array(v.string())), // Multiple emails associated with the client
     businessName: v.string(),
     contactFirstName: v.optional(v.string()),
     contactLastName: v.optional(v.string()),
@@ -83,6 +84,7 @@ export default defineSchema({
       v.literal("paused"),
       v.literal("inactive")
     )),
+    notes: v.optional(v.string()), // Notes/observations about the client
     
     // Timestamps
     createdAt: v.number(),
