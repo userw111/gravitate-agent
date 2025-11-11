@@ -15,8 +15,14 @@ import ChatClient from "./ChatClient";
 import { ModelSelector } from "./ModelSelector";
 import { ThinkingEffortSelector } from "./ThinkingEffortSelector";
 import type { ThinkingEffort } from "./ModelSelector";
-import { ZoomIn, ZoomOut, Bold as BoldIcon, Italic as ItalicIcon, Heading1, Heading2, Heading3, List, ListOrdered, Quote, Code as CodeIcon, Minus, Undo2, Redo2, Pilcrow } from "lucide-react";
+import { ZoomIn, ZoomOut, Bold as BoldIcon, Italic as ItalicIcon, Heading1, Heading2, Heading3, List, ListOrdered, Quote, Code as CodeIcon, Minus, Undo2, Redo2, Pilcrow, Link2, Link2Off } from "lucide-react";
 import { cn } from "@/lib/utils";
+import TiptapLink from "@tiptap/extension-link";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { DialogClose, DialogDescription, DialogFooter } from "./ui/dialog";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 
 // Mock script data - will be replaced with real data later
 type Script = {
@@ -92,10 +98,67 @@ export default function ScriptTabContent() {
   const isUserEditingRef = React.useRef(false);
   const lastAIContentRef = React.useRef<string>("");
   const [toolbarVersion, setToolbarVersion] = React.useState(0);
+  const [isLinkDialogOpen, setIsLinkDialogOpen] = React.useState(false);
+  const [linkUrl, setLinkUrl] = React.useState("");
+  const linkRangeRef = React.useRef<{ from: number; to: number } | null>(null);
+  const [linkPopoverOpen, setLinkPopoverOpen] = React.useState(false);
+  const [linkPopoverPos, setLinkPopoverPos] = React.useState<{ x: number; y: number } | null>(null);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [lastSavedTime, setLastSavedTime] = React.useState<Date | null>(null);
+  const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const isSavingRef = React.useRef(false);
+  const handleAutoSaveRef = React.useRef<(() => Promise<void>) | null>(null);
+  const editorRef = React.useRef<ReturnType<typeof useEditor> | null>(null);
+  const isDialogOpenRef = React.useRef(isDialogOpen);
+  const [aiFlash, setAiFlash] = React.useState(false);
+  const aiStreamTimersRef = React.useRef<number[]>([]);
+
+  // Utilities to detect changed blocks between HTML versions
+  const getBlockTexts = React.useCallback((html: string): string[] => {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+      const nodes = Array.from(doc.querySelectorAll("h1,h2,h3,p,li"));
+      return nodes.map((n) => n.textContent || "");
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const cleanupAiStreams = React.useCallback(() => {
+    // Clear timers
+    aiStreamTimersRef.current.forEach((id) => clearInterval(id));
+    aiStreamTimersRef.current = [];
+    // Remove overlays and restore visibility
+    const container = editorContainerRef.current;
+    if (!container) return;
+    const page = container.querySelector(".script-page");
+    if (!page) return;
+    const overlays = Array.from(page.querySelectorAll(".ai-type-overlay"));
+    overlays.forEach((el) => el.remove());
+    const containers = Array.from(page.querySelectorAll(".ai-type-container")) as HTMLElement[];
+    containers.forEach((el) => {
+      el.style.visibility = "";
+      el.classList.remove("ai-type-container");
+    });
+  }, []);
+  const ribbonButtonHoverClass = "cursor-pointer hover:bg-primary/90 hover:text-white hover:shadow-lg hover:-translate-y-0.5 hover:scale-[1.02] transition-all duration-200 active:translate-y-0 active:scale-100";
 
   // TipTap editor for manual editing
   const editor = useEditor({
-    extensions: [StarterKit],
+    extensions: [
+      StarterKit,
+      TiptapLink.configure({
+        openOnClick: false,
+        autolink: true,
+        linkOnPaste: true,
+        protocols: ["http", "https", "mailto", "tel"],
+        HTMLAttributes: {
+          rel: "noopener noreferrer",
+          target: null,
+        },
+      }),
+    ],
     content: "",
     immediatelyRender: false, // Required for SSR compatibility
     onUpdate: ({ editor }) => {
@@ -106,6 +169,10 @@ export default function ScriptTabContent() {
       setScriptContent(html);
       // Ensure toolbar reacts to content changes
       setToolbarVersion((v) => v + 1);
+      // Trigger save immediately on every keystroke
+      if (isDialogOpen && handleAutoSaveRef.current && !isSavingRef.current) {
+        handleAutoSaveRef.current();
+      }
       // Reset flag after a short delay
       setTimeout(() => {
         isUserEditingRef.current = false;
@@ -121,6 +188,42 @@ export default function ScriptTabContent() {
       },
     },
   });
+
+  // Keep refs in sync
+  React.useEffect(() => {
+    editorRef.current = editor;
+  }, [editor]);
+  
+  React.useEffect(() => {
+    isDialogOpenRef.current = isDialogOpen;
+  }, [isDialogOpen]);
+
+  // Auto-save function (mockup - simulates saving) - stable reference
+  const handleAutoSave = React.useCallback(async () => {
+    if (!editorRef.current || !isDialogOpenRef.current || isSavingRef.current) return;
+    
+    isSavingRef.current = true;
+    setIsSaving(true);
+    // Simulate save delay (reduced for faster feedback)
+    await new Promise(resolve => setTimeout(resolve, 300));
+    setLastSavedTime(new Date());
+    setIsSaving(false);
+    isSavingRef.current = false;
+  }, []); // No dependencies - uses refs instead
+
+  // Store save function in ref so it can be called from onUpdate
+  React.useEffect(() => {
+    handleAutoSaveRef.current = handleAutoSave;
+  }, [handleAutoSave]);
+
+  // Format time as "xx:xx am/pm"
+  const formatTime = React.useCallback((date: Date): string => {
+    return date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).toLowerCase();
+  }, []);
 
   // Update editor content when scriptContent changes (from AI updates or script selection)
   React.useEffect(() => {
@@ -196,6 +299,88 @@ export default function ScriptTabContent() {
     setIsDialogOpen(true);
   };
 
+  // Open link dialog for current selection (or current link)
+  const openLinkDialog = React.useCallback(() => {
+    if (!editor) return;
+    const chain = editor.chain().focus();
+    // If inside link, expand to it; else keep current selection
+    chain.extendMarkRange("link").run();
+    const { from, to } = editor.state.selection;
+    linkRangeRef.current = { from, to };
+    const current = editor.getAttributes("link") as { href?: string };
+    setLinkUrl(current?.href || "");
+    setIsLinkDialogOpen(true);
+  }, [editor]);
+
+  const handleLinkSave = React.useCallback(() => {
+    if (!editor) return;
+    const url = (linkUrl || "").trim();
+    // Restore selection so we always edit the intended range
+    const range = linkRangeRef.current || { from: editor.state.selection.from, to: editor.state.selection.to };
+    editor
+      .chain()
+      .focus()
+      .setTextSelection(range)
+      .extendMarkRange("link")
+      .run();
+    if (url) {
+      editor.chain().focus().setLink({ href: url }).run();
+    } else {
+      editor.chain().focus().unsetLink().run();
+    }
+    setIsLinkDialogOpen(false);
+    setToolbarVersion((v) => v + 1);
+  }, [editor, linkUrl]);
+
+  const handleEditorClick = React.useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    const anchor = target.closest("a");
+    if (anchor) {
+      e.preventDefault();
+      e.stopPropagation();
+      const href = anchor.getAttribute("href") || "";
+      setLinkUrl(href);
+      // Expand selection to clicked link for later editing
+      editor?.chain().focus().extendMarkRange("link").run();
+      if (editor) {
+        const { from, to } = editor.state.selection;
+        linkRangeRef.current = { from, to };
+      }
+      setLinkPopoverPos({ x: e.clientX, y: e.clientY });
+      setLinkPopoverOpen(true);
+    }
+  }, [editor]);
+
+  // Global capture for Tab to keep focus in editor even with Dialog focus trap
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      if (!editor || !editor.isFocused) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (editor.isActive("bulletList") || editor.isActive("orderedList")) {
+        if (e.shiftKey) {
+          editor.chain().focus().liftListItem("listItem").run();
+        } else {
+          editor.chain().focus().sinkListItem("listItem").run();
+        }
+        return;
+      }
+      if (editor.isActive("codeBlock")) {
+        editor.chain().focus().insertContent("\t").run();
+        return;
+      }
+      // Insert indent to match list styling (2em = standard indent)
+      // Using 4 non-breaking spaces to approximate 2em (roughly 32px at 16px font size)
+      editor.chain().focus().insertContent("\u00A0\u00A0\u00A0\u00A0").run();
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => {
+      window.removeEventListener("keydown", handler, true);
+    };
+  }, [editor]);
+
   // Apply heading: if caret is at end of a block and nothing selected,
   // split the block and apply heading to the new empty line instead of
   // converting the existing paragraph.
@@ -253,11 +438,75 @@ export default function ScriptTabContent() {
       const result = toolCall.result as { updatedContent?: string };
       if (result.updatedContent) {
         isUserEditingRef.current = false; // Mark as AI update
+        // Compute changed blocks between current and new content
+        const before = editor ? editor.getHTML() : scriptContent;
+        const beforeBlocks = getBlockTexts(before || "");
+        const afterBlocks = getBlockTexts(result.updatedContent);
+        const changedIndexes: number[] = [];
+        const maxLen = Math.max(beforeBlocks.length, afterBlocks.length);
+        for (let i = 0; i < maxLen; i++) {
+          if ((beforeBlocks[i] || "") !== (afterBlocks[i] || "")) {
+            changedIndexes.push(i);
+          }
+        }
+        // Replace content
         setScriptContent(result.updatedContent);
-        // Editor will update via useEffect
+        // Clean previous streaming overlays if any
+        cleanupAiStreams();
+        // After render, decorate and stream only changed blocks
+        setTimeout(() => {
+          const container = editorContainerRef.current;
+          if (!container) return;
+          const page = container.querySelector(".script-page");
+          if (!page) return;
+          const blocks = Array.from(
+            page.querySelectorAll("h1,h2,h3,p,li")
+          ) as HTMLElement[];
+          // Apply per-block streaming overlay
+          changedIndexes.forEach((idx) => {
+            const el = blocks[idx];
+            if (!el) return;
+            const finalText = el.textContent || "";
+            el.classList.add("ai-flash-block");
+            el.classList.add("ai-type-container");
+            const overlay = document.createElement("div");
+            overlay.className = "ai-type-overlay";
+            overlay.textContent = "";
+            el.appendChild(overlay);
+            // Hide underlying text while we stream overlay
+            el.style.visibility = "hidden";
+            overlay.style.visibility = "visible";
+            // Type in chunks
+            let i = 0;
+            const len = finalText.length;
+            // Choose chunkSize roughly based on length
+            const steps = Math.min(60, Math.max(20, Math.floor(len / 3)));
+            const chunkSize = Math.max(1, Math.ceil(len / steps));
+            const interval = window.setInterval(() => {
+              i = Math.min(len, i + chunkSize);
+              overlay.textContent = finalText.slice(0, i);
+              if (i >= len) {
+                clearInterval(interval);
+                // Reveal real content, remove overlay
+                overlay.remove();
+                el.style.visibility = "";
+                el.classList.remove("ai-type-container");
+                // Leave flash effect then remove
+                setTimeout(() => el.classList.remove("ai-flash-block"), 900);
+              }
+            }, 20);
+            aiStreamTimersRef.current.push(interval);
+          });
+          // Temporary AI caret on last changed block
+          const last = blocks[changedIndexes[changedIndexes.length - 1]];
+          if (last) {
+            last.classList.add("ai-caret");
+            setTimeout(() => last.classList.remove("ai-caret"), 1400);
+          }
+        }, 60);
       }
     }
-  }, []);
+  }, [editor, editorContainerRef, getBlockTexts, scriptContent, cleanupAiStreams]);
 
   const handleFinalize = React.useCallback(() => {
     if (!editor) return;
@@ -424,8 +673,18 @@ export default function ScriptTabContent() {
       if (pdfPreviewUrl) {
         URL.revokeObjectURL(pdfPreviewUrl);
       }
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
     };
   }, [pdfPreviewUrl]);
+
+  // Initialize saved time when dialog opens with existing script
+  React.useEffect(() => {
+    if (isDialogOpen && selectedScript && !lastSavedTime) {
+      setLastSavedTime(new Date());
+    }
+  }, [isDialogOpen, selectedScript, lastSavedTime]);
 
   return (
     <div className="space-y-4">
@@ -465,7 +724,20 @@ export default function ScriptTabContent() {
               <DialogTitle>
                 {selectedScript ? `Script - ${formatScriptDate(selectedScript.date)}` : "Script Editor"}
               </DialogTitle>
-              <div className="flex items-center gap-2">
+              {/* Save status indicator - centered */}
+              <div className="absolute left-1/2 transform -translate-x-1/2">
+                {isSaving ? (
+                  <div className="flex items-center gap-2 text-sm text-foreground/70 font-medium">
+                    <span className="animate-pulse">Saving...</span>
+                  </div>
+                ) : lastSavedTime ? (
+                  <div className="flex items-center gap-2 text-sm text-foreground/70 font-medium">
+                    <span className="text-green-600 dark:text-green-400">Saved</span>
+                    <span>{formatTime(lastSavedTime)}</span>
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-2 mr-8">
                 <ModelSelector value={selectedModel} onValueChange={setSelectedModel} />
                 <ThinkingEffortSelector value={thinkingEffort} onValueChange={setThinkingEffort} />
               </div>
@@ -565,80 +837,184 @@ export default function ScriptTabContent() {
                       border-top: 1px solid #ddd;
                       margin: 2em 0;
                     }
+                    /* AI highlight flash - applied when container has ai-flash */
+                    .script-page.ai-flash p,
+                    .script-page.ai-flash li,
+                    .script-page.ai-flash h1,
+                    .script-page.ai-flash h2,
+                    .script-page.ai-flash h3 {
+                      background: rgba(34,197,94,0.22);
+                      animation: aiFlash 1.2s ease-out forwards;
+                    }
+                    @keyframes aiFlash {
+                      0% { background: rgba(34,197,94,0.35); }
+                      100% { background: transparent; }
+                    }
+                    /* Per-block flash + typing shimmer */
+                    .ai-flash-block {
+                      background: rgba(34,197,94,0.22);
+                      animation: aiFlash 1.2s ease-out forwards;
+                    }
+                    .ai-typing {
+                      background-image: linear-gradient(90deg, rgba(124,58,237,0.25), rgba(124,58,237,0.0) 60%);
+                      background-size: 200% 100%;
+                      animation: aiType 0.9s linear infinite;
+                    }
+                    @keyframes aiType {
+                      0% { background-position: 0% 0; }
+                      100% { background-position: -200% 0; }
+                    }
+                    .ai-caret::after {
+                      content: "";
+                      display: inline-block;
+                      width: 2px;
+                      height: 1em;
+                      background: #7c3aed;
+                      margin-left: 2px;
+                      animation: blink 1.1s step-end infinite;
+                      vertical-align: text-bottom;
+                    }
+                    .ai-type-container { position: relative; }
+                    .ai-type-overlay {
+                      position: absolute;
+                      left: 0;
+                      top: 0;
+                      width: 100%;
+                      white-space: pre-wrap;
+                      color: currentColor;
+                      pointer-events: none;
+                    }
+                    @keyframes blink {
+                      50% { opacity: 0; }
+                    }
                   `}
                 </style>
                 {/* Zoom Controls */}
                 <div className="flex items-center justify-between px-4 py-2 border-b border-foreground/10 bg-background">
                   <div className="flex items-center flex-wrap gap-2">
+                    <TooltipProvider delayDuration={1000}>
                     {/* Zoom */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleZoomOut}
-                      className="h-8 w-8 p-0"
-                      title="Zoom Out"
-                    >
-                      <ZoomOut className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleZoomAuto}
-                      className="h-8 px-3 text-xs"
-                      title="Auto Fit"
-                    >
-                      {zoomLevel === "auto" ? "Auto" : `${Math.round(zoomScale * 100)}%`}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleZoomIn}
-                      className="h-8 w-8 p-0"
-                      title="Zoom In"
-                    >
-                      <ZoomIn className="h-4 w-4" />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleZoomOut}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass)}
+                        >
+                          <ZoomOut className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Zoom out</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleZoomAuto}
+                          className={cn("h-8 px-3 text-xs", ribbonButtonHoverClass)}
+                        >
+                          {zoomLevel === "auto" ? "Auto" : `${Math.round(zoomScale * 100)}%`}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Auto fit</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleZoomIn}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass)}
+                        >
+                          <ZoomIn className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Zoom in</TooltipContent>
+                    </Tooltip>
                     
                     <div className="w-px h-6 bg-foreground/10 mx-1" />
                     
                     {/* Basic styles */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!editor}
-                      onClick={() => { editor?.chain().focus().toggleBold().run(); setToolbarVersion((v)=>v+1); }}
-                      className={cn("h-8 w-8 p-0", editor?.isActive("bold") && "bg-foreground/10")}
-                      title="Bold"
-                    >
-                      <BoldIcon className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!editor}
-                      onClick={() => { editor?.chain().focus().toggleItalic().run(); setToolbarVersion((v)=>v+1); }}
-                      className={cn("h-8 w-8 p-0", editor?.isActive("italic") && "bg-foreground/10")}
-                      title="Italic"
-                    >
-                      <ItalicIcon className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!editor}
-                      onClick={() => { editor?.chain().focus().setParagraph().run(); setToolbarVersion((v)=>v+1); }}
-                      className={cn("h-8 w-8 p-0", editor?.isActive("paragraph") && "bg-foreground/10")}
-                      title="Paragraph"
-                    >
-                      <Pilcrow className="h-4 w-4" />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!editor}
+                          onClick={() => { editor?.chain().focus().toggleBold().run(); setToolbarVersion((v)=>v+1); }}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass, editor?.isActive("bold") && "bg-foreground/10")}
+                        >
+                          <BoldIcon className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Bold</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!editor}
+                          onClick={() => { editor?.chain().focus().toggleItalic().run(); setToolbarVersion((v)=>v+1); }}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass, editor?.isActive("italic") && "bg-foreground/10")}
+                        >
+                          <ItalicIcon className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Italic</TooltipContent>
+                    </Tooltip>
+                    
+                    {/* Link controls */}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!editor}
+                          onClick={openLinkDialog}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass, editor?.isActive("link") && "bg-foreground/10")}
+                        >
+                          <Link2 className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Add/edit link</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!editor || !editor.isActive("link")}
+                          onClick={() => { editor?.chain().focus().extendMarkRange("link").unsetLink().run(); setToolbarVersion((v)=>v+1); }}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass)}
+                        >
+                          <Link2Off className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Remove link</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!editor}
+                          onClick={() => { editor?.chain().focus().setParagraph().run(); setToolbarVersion((v)=>v+1); }}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass, editor?.isActive("paragraph") && "bg-foreground/10")}
+                        >
+                          <Pilcrow className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Paragraph</TooltipContent>
+                    </Tooltip>
                     <Button
                       variant="outline"
                       size="sm"
                       disabled={!editor}
                       onClick={() => applyHeading(1)}
-                      className={cn("h-8 w-8 p-0", editor?.isActive("heading", { level: 1 }) && "bg-foreground/10")}
-                      title="Heading 1"
+                      className={cn("h-8 w-8 p-0", ribbonButtonHoverClass, editor?.isActive("heading", { level: 1 }) && "bg-foreground/10")}
                     >
                       <Heading1 className="h-4 w-4" />
                     </Button>
@@ -647,8 +1023,7 @@ export default function ScriptTabContent() {
                       size="sm"
                       disabled={!editor}
                       onClick={() => applyHeading(2)}
-                      className={cn("h-8 w-8 p-0", editor?.isActive("heading", { level: 2 }) && "bg-foreground/10")}
-                      title="Heading 2"
+                      className={cn("h-8 w-8 p-0", ribbonButtonHoverClass, editor?.isActive("heading", { level: 2 }) && "bg-foreground/10")}
                     >
                       <Heading2 className="h-4 w-4" />
                     </Button>
@@ -657,8 +1032,7 @@ export default function ScriptTabContent() {
                       size="sm"
                       disabled={!editor}
                       onClick={() => applyHeading(3)}
-                      className={cn("h-8 w-8 p-0", editor?.isActive("heading", { level: 3 }) && "bg-foreground/10")}
-                      title="Heading 3"
+                      className={cn("h-8 w-8 p-0", ribbonButtonHoverClass, editor?.isActive("heading", { level: 3 }) && "bg-foreground/10")}
                     >
                       <Heading3 className="h-4 w-4" />
                     </Button>
@@ -666,84 +1040,113 @@ export default function ScriptTabContent() {
                     <div className="w-px h-6 bg-foreground/10 mx-1" />
                     
                     {/* Lists & quote */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!editor}
-                      onClick={() => applyBlockToggle("bulletList")}
-                      className={cn("h-8 w-8 p-0", editor?.isActive("bulletList") && "bg-foreground/10")}
-                      title="Bulleted list"
-                    >
-                      <List className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!editor}
-                      onClick={() => applyBlockToggle("orderedList")}
-                      className={cn("h-8 w-8 p-0", editor?.isActive("orderedList") && "bg-foreground/10")}
-                      title="Numbered list"
-                    >
-                      <ListOrdered className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!editor}
-                      onClick={() => applyBlockToggle("blockquote")}
-                      className={cn("h-8 w-8 p-0", editor?.isActive("blockquote") && "bg-foreground/10")}
-                      title="Blockquote"
-                    >
-                      <Quote className="h-4 w-4" />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!editor}
+                          onClick={() => applyBlockToggle("bulletList")}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass, editor?.isActive("bulletList") && "bg-foreground/10")}
+                        >
+                          <List className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Bulleted list</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!editor}
+                          onClick={() => applyBlockToggle("orderedList")}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass, editor?.isActive("orderedList") && "bg-foreground/10")}
+                        >
+                          <ListOrdered className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Numbered list</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!editor}
+                          onClick={() => applyBlockToggle("blockquote")}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass, editor?.isActive("blockquote") && "bg-foreground/10")}
+                        >
+                          <Quote className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Blockquote</TooltipContent>
+                    </Tooltip>
                     
                     <div className="w-px h-6 bg-foreground/10 mx-1" />
                     
                     {/* Code, HR */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!editor}
-                      onClick={() => applyBlockToggle("codeBlock")}
-                      className={cn("h-8 w-8 p-0", editor?.isActive("codeBlock") && "bg-foreground/10")}
-                      title="Code block"
-                    >
-                      <CodeIcon className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!editor}
-                      onClick={() => editor?.chain().focus().setHorizontalRule().run()}
-                      className="h-8 w-8 p-0"
-                      title="Horizontal rule"
-                    >
-                      <Minus className="h-4 w-4" />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!editor}
+                          onClick={() => applyBlockToggle("codeBlock")}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass, editor?.isActive("codeBlock") && "bg-foreground/10")}
+                        >
+                          <CodeIcon className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Code block</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!editor}
+                          onClick={() => editor?.chain().focus().setHorizontalRule().run()}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass)}
+                        >
+                          <Minus className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Horizontal rule</TooltipContent>
+                    </Tooltip>
                     
                     <div className="w-px h-6 bg-foreground/10 mx-1" />
                     
                     {/* Undo/Redo */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!editor}
-                      onClick={() => editor?.chain().focus().undo().run()}
-                      className="h-8 w-8 p-0"
-                      title="Undo"
-                    >
-                      <Undo2 className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!editor}
-                      onClick={() => editor?.chain().focus().redo().run()}
-                      className="h-8 w-8 p-0"
-                      title="Redo"
-                    >
-                      <Redo2 className="h-4 w-4" />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!editor}
+                          onClick={() => editor?.chain().focus().undo().run()}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass)}
+                        >
+                          <Undo2 className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Undo</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!editor}
+                          onClick={() => editor?.chain().focus().redo().run()}
+                          className={cn("h-8 w-8 p-0", ribbonButtonHoverClass)}
+                        >
+                          <Redo2 className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Redo</TooltipContent>
+                    </Tooltip>
+                    </TooltipProvider>
                   </div>
                 </div>
                 
@@ -763,10 +1166,11 @@ export default function ScriptTabContent() {
                       transition: 'transform 0.2s ease',
                     }}
                   >
-                    <div className="script-page">
+                    <div className={`script-page ${aiFlash ? "ai-flash" : ""}`}>
                       {editor && (
                         <EditorContent 
                           editor={editor}
+                          onClick={handleEditorClick}
                           className="focus:outline-none"
                         />
                       )}
@@ -803,6 +1207,76 @@ export default function ScriptTabContent() {
               </div>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Link action popover (Open | Edit) */}
+      {linkPopoverPos && (
+        <Popover open={linkPopoverOpen} onOpenChange={setLinkPopoverOpen}>
+          <PopoverTrigger asChild>
+            <span
+              style={{
+                position: 'fixed',
+                left: linkPopoverPos.x,
+                top: linkPopoverPos.y,
+                width: 1,
+                height: 1,
+              }}
+            />
+          </PopoverTrigger>
+          <PopoverContent className="p-2 w-40" side="top" align="start">
+            <div className="flex flex-col gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  if (linkUrl) window.open(linkUrl, "_blank", "noopener,noreferrer");
+                  setLinkPopoverOpen(false);
+                }}
+              >
+                Open link
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setLinkPopoverOpen(false);
+                  setIsLinkDialogOpen(true);
+                }}
+              >
+                Edit link
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+      )}
+
+      {/* Link add/edit dialog */}
+      <Dialog open={isLinkDialogOpen} onOpenChange={setIsLinkDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Edit link</DialogTitle>
+            <DialogDescription>
+              Enter a URL for the selected text. Use a full URL like https://example.com
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-3">
+              <Label htmlFor="link-url">URL</Label>
+              <Input
+                id="link-url"
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                placeholder="https://example.com"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Cancel</Button>
+            </DialogClose>
+            <Button onClick={handleLinkSave}>Save changes</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
