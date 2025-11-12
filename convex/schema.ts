@@ -99,6 +99,16 @@ export default defineSchema({
     meetingId: v.string(),
     title: v.string(),
     transcript: v.string(),
+    // Optional structured sentences preserving speaker labels
+    sentences: v.optional(
+      v.array(
+        v.object({
+          text: v.string(),
+          speakerName: v.optional(v.string()),
+          speakerId: v.optional(v.string()),
+        })
+      )
+    ),
     date: v.number(),
     duration: v.optional(v.number()),
     participants: v.optional(v.array(v.string())),

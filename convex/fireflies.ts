@@ -158,6 +158,15 @@ export const storeTranscript = mutation({
     meetingId: v.string(),
     title: v.string(),
     transcript: v.string(),
+    sentences: v.optional(
+      v.array(
+        v.object({
+          text: v.string(),
+          speakerName: v.optional(v.string()),
+          speakerId: v.optional(v.string()),
+        })
+      )
+    ),
     date: v.number(),
     duration: v.optional(v.number()),
     participants: v.optional(v.array(v.string())),
@@ -196,6 +205,7 @@ export const storeTranscript = mutation({
       const updateData: {
         title: string;
         transcript: string;
+        sentences?: Array<{ text: string; speakerName?: string; speakerId?: string }>;
         date: number;
         duration?: number;
         participants?: string[];
@@ -207,6 +217,7 @@ export const storeTranscript = mutation({
       } = {
         title: args.title,
         transcript: args.transcript,
+        sentences: args.sentences,
         date: args.date,
         duration: args.duration,
         participants: args.participants,
@@ -242,6 +253,7 @@ export const storeTranscript = mutation({
       meetingId: string;
       title: string;
       transcript: string;
+      sentences?: Array<{ text: string; speakerName?: string; speakerId?: string }>;
       date: number;
       duration?: number;
       participants?: string[];
@@ -256,6 +268,7 @@ export const storeTranscript = mutation({
       meetingId: args.meetingId,
       title: args.title,
       transcript: args.transcript,
+      sentences: args.sentences,
       date: args.date,
       duration: args.duration,
       participants: args.participants,

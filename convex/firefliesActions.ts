@@ -255,6 +255,7 @@ export const fetchFirefliesTranscripts = action({
     duration?: number;
     transcript: string;
     participants?: string[];
+    sentences?: Array<{ text: string; speakerName?: string; speakerId?: string }>;
   }>> => {
     const config: { apiKey?: string } | null = await ctx.runQuery(api.fireflies.getConfigForEmail, {
       email: args.email,
@@ -331,6 +332,15 @@ export const fetchFirefliesTranscripts = action({
       // Participants is already an array of strings
       const participants = transcript.participants || [];
 
+      // Normalize sentences to include speaker labels
+      const normalizedSentences = transcript.sentences
+        ? transcript.sentences.map((s) => ({
+            text: s.text,
+            speakerName: s.speaker_name,
+            speakerId: s.speaker_id,
+          }))
+        : undefined;
+
       return {
         id: transcript.id,
         title: transcript.title || "Untitled Meeting",
@@ -338,6 +348,7 @@ export const fetchFirefliesTranscripts = action({
         duration: transcript.duration,
         transcript: fullTranscript,
         participants,
+        sentences: normalizedSentences,
       };
     });
   },
@@ -358,6 +369,7 @@ export const fetchTranscriptById = action({
     duration?: number;
     transcript: string;
     participants?: string[];
+    sentences?: Array<{ text: string; speakerName?: string; speakerId?: string }>;
   } | null> => {
     const config: { apiKey?: string } | null = await ctx.runQuery(api.fireflies.getConfigForEmail, {
       email: args.email,
@@ -436,6 +448,15 @@ export const fetchTranscriptById = action({
     // Participants is already an array of strings
     const participants = transcript.participants || [];
 
+    // Normalize sentences to include speaker labels
+    const normalizedSentences = transcript.sentences
+      ? transcript.sentences.map((s) => ({
+          text: s.text,
+          speakerName: s.speaker_name,
+          speakerId: s.speaker_id,
+        }))
+      : undefined;
+
     return {
       id: transcript.id,
       title: transcript.title || "Untitled Meeting",
@@ -443,6 +464,7 @@ export const fetchTranscriptById = action({
       duration: transcript.duration,
       transcript: fullTranscript,
       participants,
+      sentences: normalizedSentences,
     };
   },
 });
@@ -462,6 +484,7 @@ export const syncFirefliesTranscripts = action({
       duration?: number;
       transcript: string;
       participants?: string[];
+      sentences?: Array<{ text: string; speakerName?: string; speakerId?: string }>;
     }> = await ctx.runAction(api.firefliesActions.fetchFirefliesTranscripts, {
       email: args.email,
     });
@@ -500,6 +523,7 @@ export const syncFirefliesTranscripts = action({
           meetingId: transcript.id, // Using transcript ID as meeting ID for now
           title: transcript.title,
           transcript: transcript.transcript,
+          sentences: transcript.sentences,
           date: dateTimestamp,
           duration: transcript.duration,
           participants: transcript.participants,
@@ -583,6 +607,7 @@ export const fetchAndStoreTranscriptById = action({
         transcriptId: transcript.id,
         title: transcript.title,
         transcript: transcript.transcript,
+        sentences: transcript.sentences,
         date: dateTimestamp,
         duration: transcript.duration,
         participants: transcript.participants,
