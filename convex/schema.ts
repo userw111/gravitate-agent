@@ -145,6 +145,32 @@ export default defineSchema({
     .index("by_meeting_id", ["meetingId"])
     .index("by_client", ["clientId"])
     .index("by_email_unlinked", ["email", "clientId"]), // For finding unlinked transcripts
+  scripts: defineTable({
+    ownerEmail: v.string(),
+    clientId: v.id("clients"),
+    title: v.string(),
+    contentHtml: v.string(), // HTML content matching TipTap format
+    source: v.object({
+      type: v.union(v.literal("typeform"), v.literal("manual"), v.literal("cron")),
+      responseId: v.optional(v.string()), // For typeform source
+      cronJobId: v.optional(v.string()), // For future cron jobs
+    }),
+    model: v.optional(v.string()), // Model used for generation (e.g., "openai/gpt-5")
+    thinkingEffort: v.optional(v.union(v.literal("low"), v.literal("medium"), v.literal("high"))),
+    status: v.union(v.literal("draft"), v.literal("final")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_client", ["clientId", "createdAt"])
+    .index("by_owner", ["ownerEmail", "createdAt"])
+    .index("by_source_response", ["source.responseId"]),
+  script_settings: defineTable({
+    email: v.string(),
+    defaultModel: v.optional(v.string()), // Default model for script generation
+    defaultThinkingEffort: v.optional(v.union(v.literal("low"), v.literal("medium"), v.literal("high"))),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_email", ["email"]),
 });
 
 

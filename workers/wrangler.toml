@@ -1,0 +1,12 @@
+name = "script-generation-workflow"
+main = "script-generation-workflow.ts"
+compatibility_date = "2025-03-01"
+compatibility_flags = ["nodejs_compat"]
+
+[env.development]
+name = "script-generation-workflow-dev"
+
+# Environment variables (set via .dev.vars or wrangler secret)
+# NEXT_PUBLIC_CONVEX_URL=your_convex_url
+# OPENROUTER_API_KEY=your_openrouter_key
+

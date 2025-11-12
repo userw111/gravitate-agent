@@ -99,6 +99,12 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
 
   const client = clientByResponseId || clientById;
   const updateClient = useMutation(api.clients.updateClient);
+  // Get script count for this client (must be before any conditional returns to preserve hook order)
+  const scriptCount = useQuery(
+    api.scripts.getScriptCountForClient,
+    client ? { clientId: client._id, ownerEmail: email } : "skip"
+  );
+  const totalScriptsGenerated = scriptCount ?? 0;
 
   // Initialize notes from client data
   React.useEffect(() => {
@@ -355,7 +361,6 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
     additionalInfo = extracted;
   }
 
-  const totalScriptsGenerated = 0; // TODO: Calculate from scripts table when implemented
   const submittedAt = additionalInfo.submittedAt || new Date(client.createdAt).toISOString();
   const nextScriptDate = getNextScriptDate(submittedAt);
   const lastCallDate = transcripts && transcripts.length > 0 
@@ -945,7 +950,7 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
             {/* Scripts Tab */}
             {activeTab === "scripts" && (
               <div>
-                <ScriptTabContent />
+                <ScriptTabContent clientId={client._id} ownerEmail={email} />
               </div>
             )}
 

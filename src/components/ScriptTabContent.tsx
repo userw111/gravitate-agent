@@ -1,6 +1,9 @@
 "use client";
 
 import * as React from "react";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 import { Card } from "./ui/card";
 import {
   Dialog,
@@ -24,56 +27,10 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 
-// Mock script data - will be replaced with real data later
-type Script = {
-  id: string;
-  date: string;
-  content: string;
+type ScriptTabContentProps = {
+  clientId: Id<"clients">;
+  ownerEmail: string;
 };
-
-// Generate mock scripts for demonstration
-function generateMockScripts(): Script[] {
-  const scripts: Script[] = [];
-  const today = new Date();
-  
-  for (let i = 0; i < 5; i++) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i * 7); // One script per week
-    
-    scripts.push({
-      id: `script-${i}`,
-      date: date.toISOString(),
-      content: `<h1>Client Script - ${date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</h1>
-
-<h2>Opening</h2>
-
-<p>Hello! I hope this message finds you well. I wanted to reach out because I noticed your company has been making great strides in the industry.</p>
-
-<h2>Value Proposition</h2>
-
-<p>We've helped similar companies achieve significant growth by implementing our solution. Our platform can help you:</p>
-
-<ul>
-<li>Increase efficiency by 40%</li>
-<li>Reduce operational costs</li>
-<li>Scale your business faster</li>
-</ul>
-
-<h2>Social Proof</h2>
-
-<p>We've worked with companies like <a href="#">Client Name</a> and <a href="#">Another Client</a> who have seen remarkable results.</p>
-
-<h2>Call to Action</h2>
-
-<p>Would you be interested in a quick 15-minute call to discuss how we can help your business grow?</p>
-
-<p>Best regards,<br>
-[Your Name]</p>`,
-    });
-  }
-  
-  return scripts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-}
 
 function formatScriptDate(dateString: string): string {
   const date = new Date(dateString);
@@ -84,9 +41,13 @@ function formatScriptDate(dateString: string): string {
   });
 }
 
-export default function ScriptTabContent() {
-  const [scripts] = React.useState<Script[]>(generateMockScripts());
-  const [selectedScript, setSelectedScript] = React.useState<Script | null>(null);
+export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabContentProps) {
+  const scripts = useQuery(api.scripts.getScriptsForClient, {
+    clientId,
+    ownerEmail,
+  });
+  const updateScript = useMutation(api.scripts.updateScriptContent);
+  const [selectedScriptId, setSelectedScriptId] = React.useState<Id<"scripts"> | null>(null);
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [scriptContent, setScriptContent] = React.useState<string>(""); // Now stores HTML
   const [selectedModel, setSelectedModel] = React.useState("openai/gpt-5");
@@ -97,6 +58,8 @@ export default function ScriptTabContent() {
   const editorContainerRef = React.useRef<HTMLDivElement>(null);
   const isUserEditingRef = React.useRef(false);
   const lastAIContentRef = React.useRef<string>("");
+  const [isExporting, setIsExporting] = React.useState(false);
+  const [isCopying, setIsCopying] = React.useState(false);
   const [toolbarVersion, setToolbarVersion] = React.useState(0);
   const [isLinkDialogOpen, setIsLinkDialogOpen] = React.useState(false);
   const [linkUrl, setLinkUrl] = React.useState("");
@@ -198,24 +161,6 @@ export default function ScriptTabContent() {
     isDialogOpenRef.current = isDialogOpen;
   }, [isDialogOpen]);
 
-  // Auto-save function (mockup - simulates saving) - stable reference
-  const handleAutoSave = React.useCallback(async () => {
-    if (!editorRef.current || !isDialogOpenRef.current || isSavingRef.current) return;
-    
-    isSavingRef.current = true;
-    setIsSaving(true);
-    // Simulate save delay (reduced for faster feedback)
-    await new Promise(resolve => setTimeout(resolve, 300));
-    setLastSavedTime(new Date());
-    setIsSaving(false);
-    isSavingRef.current = false;
-  }, []); // No dependencies - uses refs instead
-
-  // Store save function in ref so it can be called from onUpdate
-  React.useEffect(() => {
-    handleAutoSaveRef.current = handleAutoSave;
-  }, [handleAutoSave]);
-
   // Format time as "xx:xx am/pm"
   const formatTime = React.useCallback((date: Date): string => {
     return date.toLocaleTimeString("en-US", {
@@ -292,12 +237,61 @@ export default function ScriptTabContent() {
     setZoomLevel("auto");
   };
 
-  const handleScriptClick = (script: Script) => {
-    setSelectedScript(script);
+  const selectedScript = selectedScriptId && scripts
+    ? scripts.find((s) => s._id === selectedScriptId) || null
+    : null;
+
+  const handleScriptClick = (scriptId: Id<"scripts">) => {
+    setSelectedScriptId(scriptId);
     isUserEditingRef.current = false; // Reset flag when selecting new script
-    setScriptContent(script.content);
+    const script = scripts?.find((s) => s._id === scriptId);
+    if (script) {
+      setScriptContent(script.contentHtml);
     setIsDialogOpen(true);
+    }
   };
+
+  // Auto-save script content when user edits
+  React.useEffect(() => {
+    if (selectedScriptId && scriptContent && isUserEditingRef.current && handleAutoSaveRef.current) {
+      // Debounce auto-save
+      const timeoutId = setTimeout(() => {
+        if (handleAutoSaveRef.current && !isSavingRef.current) {
+          handleAutoSaveRef.current();
+        }
+      }, 2000); // 2 second debounce
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [scriptContent, selectedScriptId]);
+
+  // Update auto-save to persist to database
+  const handleAutoSave = React.useCallback(async () => {
+    if (!editorRef.current || !isDialogOpenRef.current || isSavingRef.current || !selectedScriptId) return;
+    
+    isSavingRef.current = true;
+    setIsSaving(true);
+    
+    try {
+      const html = editorRef.current.getHTML();
+      await updateScript({
+        scriptId: selectedScriptId,
+        ownerEmail,
+        contentHtml: html,
+      });
+      setLastSavedTime(new Date());
+    } catch (error) {
+      console.error("Failed to save script:", error);
+    } finally {
+      setIsSaving(false);
+      isSavingRef.current = false;
+    }
+  }, [selectedScriptId, ownerEmail, updateScript]);
+
+  // Store save function in ref so it can be called from onUpdate
+  React.useEffect(() => {
+    handleAutoSaveRef.current = handleAutoSave;
+  }, [handleAutoSave]);
 
   // Open link dialog for current selection (or current link)
   const openLinkDialog = React.useCallback(() => {
@@ -311,6 +305,136 @@ export default function ScriptTabContent() {
     setLinkUrl(current?.href || "");
     setIsLinkDialogOpen(true);
   }, [editor]);
+
+  // Export current script content as a Word (.docx) document (client-side)
+  const handleExportWord = React.useCallback(async () => {
+    try {
+      setIsExporting(true);
+      const html = editorRef.current ? editorRef.current.getHTML() : scriptContent || "";
+      if (!html || html.trim().length === 0) {
+        console.warn("No content to export");
+        setIsExporting(false);
+        return;
+      }
+      // Wrap with minimal HTML/CSS to preserve structure
+      const wrappedHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="UTF-8" />
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                line-height: 1.6;
+                color: #000;
+              }
+              h1 { font-size: 2em; font-weight: 700; }
+              h2 { font-size: 1.5em; font-weight: 600; }
+              h3 { font-size: 1.25em; font-weight: 600; }
+              p { margin: 0 0 1em 0; }
+              ul, ol { margin: 0 0 1em 1.5em; }
+              li { margin-bottom: 0.5em; }
+              blockquote { border-left: 4px solid #ddd; padding-left: 1em; color: #555; }
+              code { font-family: 'Courier New', monospace; font-size: 0.95em; background: #f4f4f4; padding: 2px 4px; }
+              pre { background: #f4f4f4; padding: 1em; overflow-x: auto; }
+              a { color: #1155cc; text-decoration: underline; }
+            </style>
+          </head>
+          <body>
+            ${html}
+          </body>
+        </html>
+      `;
+      // Dynamic import to keep SSR safe
+      const mod = await import("html-docx-js/dist/html-docx");
+      const htmlDocx = mod.default || (mod as any);
+      const blob: Blob = htmlDocx.asBlob(wrappedHtml);
+      const url = URL.createObjectURL(blob);
+      const createdAt =
+        (selectedScript?.createdAt && new Date(selectedScript.createdAt).toISOString().slice(0, 10)) ||
+        new Date().toISOString().slice(0, 10);
+      const filename = `Script-${createdAt}.docx`;
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to export Word document:", err);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [scriptContent, selectedScript]);
+
+  // Copy with formatting (HTML) for Google Docs / Word
+  const handleCopyRich = React.useCallback(async () => {
+    try {
+      setIsCopying(true);
+      const html = editorRef.current ? editorRef.current.getHTML() : scriptContent || "";
+      if (!html || html.trim().length === 0) {
+        console.warn("No content to copy");
+        setIsCopying(false);
+        return;
+      }
+      // Also provide a plain text alternative
+      const plain = editorRef.current ? editorRef.current.getText() : (html.replace(/<[^>]+>/g, " ") || "");
+      // Preferred: Clipboard API with text/html (use fragment, not full HTML document)
+      try {
+        if (navigator.clipboard && (window as any).ClipboardItem) {
+          const data = {
+            "text/html": new Blob([html], { type: "text/html" }),
+            "text/plain": new Blob([plain], { type: "text/plain" }),
+          } as Record<string, Blob>;
+          const ClipboardItemCtor = (window as any).ClipboardItem;
+          await navigator.clipboard.write([new ClipboardItemCtor(data)]);
+          return;
+        }
+      } catch {
+        // Fall through to selection-based copy
+      }
+      // Fallback 1: Select the visible editor DOM and copy (browsers generate rich HTML for selection)
+      const editorDom: HTMLElement | null =
+        (editorRef.current && (editorRef.current as any).view && (editorRef.current as any).view.dom) || null;
+      if (editorDom) {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(editorDom);
+        if (selection) {
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+        document.execCommand("copy");
+        // Restore focus to editor
+        (editorRef.current as any)?.commands?.focus?.();
+        return;
+      }
+      // Fallback 2: execCommand on hidden contenteditable
+      const hidden = document.createElement("div");
+      hidden.setAttribute("contenteditable", "true");
+      hidden.style.position = "fixed";
+      hidden.style.left = "-9999px";
+      hidden.style.whiteSpace = "pre-wrap";
+      hidden.innerHTML = html;
+      document.body.appendChild(hidden);
+      const range = document.createRange();
+      range.selectNodeContents(hidden);
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      document.execCommand("copy");
+      document.body.removeChild(hidden);
+      // Restore focus to editor
+      (editorRef.current as any)?.commands?.focus?.();
+    } catch (err) {
+      console.error("Failed to copy rich text:", err);
+    } finally {
+      setIsCopying(false);
+    }
+  }, [scriptContent]);
 
   const handleLinkSave = React.useCallback(() => {
     if (!editor) return;
@@ -686,6 +810,16 @@ export default function ScriptTabContent() {
     }
   }, [isDialogOpen, selectedScript, lastSavedTime]);
 
+  if (scripts === undefined) {
+    return (
+      <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
+        <div className="p-12 text-center">
+          <p className="text-sm text-foreground/60 font-light">Loading scripts...</p>
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {scripts.length === 0 ? (
@@ -700,16 +834,16 @@ export default function ScriptTabContent() {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {scripts.map((script) => (
             <Card
-              key={script.id}
+              key={script._id}
               className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md cursor-pointer hover:shadow-lg transition-shadow"
-              onClick={() => handleScriptClick(script)}
+              onClick={() => handleScriptClick(script._id)}
             >
               <div className="p-4">
                 <div className="text-sm font-medium text-foreground mb-2">
-                  {formatScriptDate(script.date)}
+                  {formatScriptDate(new Date(script.createdAt).toISOString())}
                 </div>
                 <div className="text-xs text-foreground/60 font-light line-clamp-2">
-                  {script.content.replace(/<[^>]+>/g, '').substring(0, 100)}...
+                  {script.contentHtml.replace(/<[^>]+>/g, '').substring(0, 100)}...
                 </div>
               </div>
             </Card>
@@ -722,7 +856,7 @@ export default function ScriptTabContent() {
           <DialogHeader className="px-6 py-4 border-b">
             <div className="flex items-center justify-between">
               <DialogTitle>
-                {selectedScript ? `Script - ${formatScriptDate(selectedScript.date)}` : "Script Editor"}
+                {selectedScript ? `Script - ${formatScriptDate(new Date(selectedScript.createdAt).toISOString())}` : "Script Editor"}
               </DialogTitle>
               {/* Save status indicator - centered */}
               <div className="absolute left-1/2 transform -translate-x-1/2">
@@ -1180,12 +1314,30 @@ export default function ScriptTabContent() {
                 
                 {/* Footer with Finalize button */}
                 <div className="border-t border-foreground/10 px-6 py-4 bg-background">
-                  <Button
-                    onClick={handleFinalize}
-                    className="w-full cursor-pointer hover:bg-primary/90 hover:shadow-lg hover:-translate-y-0.5 hover:scale-[1.02] transition-all duration-200 active:translate-y-0 active:scale-100"
-                  >
-                    Finalize
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      disabled={isCopying || !editor}
+                      onClick={handleCopyRich}
+                      className="cursor-pointer hover:bg-accent hover:text-accent-foreground transition-all duration-200"
+                    >
+                      {isCopying ? "Copying..." : "Copy Rich Text"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={isExporting || !editor}
+                      onClick={handleExportWord}
+                      className="cursor-pointer hover:bg-accent hover:text-accent-foreground transition-all duration-200"
+                    >
+                      {isExporting ? "Exporting..." : "Export Word (.docx)"}
+                    </Button>
+                    <Button
+                      onClick={handleFinalize}
+                      className="flex-1 cursor-pointer hover:bg-primary/90 hover:shadow-lg hover:-translate-y-0.5 hover:scale-[1.02] transition-all duration-200 active:translate-y-0 active:scale-100"
+                    >
+                      Finalize
+                    </Button>
+                  </div>
                 </div>
               </div>
 

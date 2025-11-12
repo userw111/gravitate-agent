@@ -1,0 +1,12 @@
+# Copy this file to .dev.vars and fill in your values
+# .dev.vars is gitignored and used by wrangler dev for local development
+
+# Convex URL
+NEXT_PUBLIC_CONVEX_URL=https://your-convex-deployment.convex.cloud
+
+# OpenRouter API Key
+OPENROUTER_API_KEY=your_openrouter_api_key
+
+# App URL (for HTTP-Referer header)
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+

@@ -12,6 +12,8 @@ import type * as clients from "../clients.js";
 import type * as database from "../database.js";
 import type * as fireflies from "../fireflies.js";
 import type * as firefliesActions from "../firefliesActions.js";
+import type * as scriptSettings from "../scriptSettings.js";
+import type * as scripts from "../scripts.js";
 import type * as typeform from "../typeform.js";
 import type * as typeformActions from "../typeformActions.js";
 import type * as users from "../users.js";
@@ -35,6 +37,8 @@ declare const fullApi: ApiFromModules<{
   database: typeof database;
   fireflies: typeof fireflies;
   firefliesActions: typeof firefliesActions;
+  scriptSettings: typeof scriptSettings;
+  scripts: typeof scripts;
   typeform: typeof typeform;
   typeformActions: typeof typeformActions;
   users: typeof users;

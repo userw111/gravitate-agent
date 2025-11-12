@@ -205,47 +205,82 @@ export async function POST(request: Request) {
                 qaPairs: qaPairs.length > 0 ? qaPairs : undefined,
               });
               
-              // Extract client info and create/update client
-              const answers = formResponse.answers as Array<{ text?: string }> | undefined;
+              // Extract client info using explicit field mapping from qaPairs
+              // Field mapping for the single Typeform form
+              const FIELD_MAPPING: Record<string, { field: string; type: "string" | "number" | "email" }> = {
+                // Full Name
+                "98e94d78-6c72-4ea2-806e-9675f326550e": { field: "contactFirstName", type: "string" },
+                // Business Name
+                "01K3PZTF2WHB908HD47FDXE81C": { field: "businessName", type: "string" },
+                // Email
+                "a0e9781d-38e4-4768-af2c-19a4518d2ac7": { field: "businessEmail", type: "email" },
+                // Target Revenue (monthly)
+                "6589c67b-c739-4372-96e0-a5e3b6a52220": { field: "targetRevenue", type: "number" },
+              };
+              
               let businessEmail: string | null = null;
               let businessName: string | null = null;
               let firstName: string | null = null;
               let lastName: string | null = null;
               let targetRevenue: number | null = null;
               
-              if (answers && Array.isArray(answers)) {
-                // Extract name (first answer)
-                if (answers[0]?.text) {
-                  const nameParts = answers[0].text.trim().split(/\s+/);
-                  if (nameParts.length >= 1) firstName = nameParts[0];
-                  if (nameParts.length >= 2) lastName = nameParts.slice(1).join(" ");
-                }
+              // Extract data from qaPairs using explicit mapping
+              for (const qa of qaPairs) {
+                const fieldRef = qa.fieldRef?.trim();
+                if (!fieldRef) continue;
                 
-                // Extract business name (second answer)
-                if (answers[1]?.text) {
-                  businessName = answers[1].text.trim();
-                }
+                const mapping = FIELD_MAPPING[fieldRef];
+                if (!mapping) continue;
                 
-                // Extract email
-                for (const answer of answers) {
-                  if (answer.text && answer.text.includes("@")) {
-                    const emailMatch = answer.text.match(/[\w.-]+@[\w.-]+\.\w+/);
-                    if (emailMatch) {
-                      businessEmail = emailMatch[0];
-                      break;
+                const value = qa.answer?.trim();
+                // Allow empty email (it might be optional)
+                if (!value && mapping.field !== "businessEmail") continue;
+                
+                switch (mapping.field) {
+                  case "businessName":
+                    businessName = value;
+                    break;
+                  case "businessEmail":
+                    if (value) {
+                      businessEmail = value.toLowerCase();
                     }
+                      break;
+                  case "contactFirstName": {
+                    const nameParts = value.split(/\s+/);
+                    firstName = nameParts[0] || null;
+                    if (nameParts.length > 1) {
+                      lastName = nameParts.slice(1).join(" ");
+                    }
+                    break;
                   }
-                }
-                
-                // Extract target revenue
-                for (const answer of answers) {
-                  if (answer.text) {
-                    const cleaned = answer.text.replace(/,/g, "").trim();
-                    const num = parseInt(cleaned, 10);
-                    if (!isNaN(num) && num >= 10000 && num <= 10000000) {
-                      targetRevenue = num;
-                      break;
+                  case "targetRevenue": {
+                    // Handle ranges like "20-30k" or "20k-30k"
+                    let num: number | null = null;
+                    const cleaned = value.replace(/,/g, "").toLowerCase().trim();
+                    
+                    // Try to parse range (e.g., "20-30k" -> take upper bound)
+                    const rangeMatch = cleaned.match(/(\d+)\s*-\s*(\d+)\s*k/i);
+                    if (rangeMatch) {
+                      const upper = parseInt(rangeMatch[2], 10) * 1000;
+                      num = upper;
+                    } else {
+                      // Try single number with k suffix
+                      const kMatch = cleaned.match(/(\d+)\s*k/i);
+                      if (kMatch) {
+                        num = parseInt(kMatch[1], 10) * 1000;
+                      } else {
+                        // Try plain number
+                        const plainNum = parseInt(cleaned, 10);
+                        if (!isNaN(plainNum) && plainNum > 0) {
+                          num = plainNum;
+                        }
+                      }
                     }
+                    
+                    if (num && num > 0) {
+                      targetRevenue = num;
+                    }
+                    break;
                   }
                 }
               }
@@ -262,20 +297,41 @@ export async function POST(request: Request) {
                     onboardingResponseId: responseId,
                     targetRevenue: targetRevenue || undefined,
                   });
+                  
+                  // Trigger script generation via Cloudflare Workflow (or fallback to direct)
+                  // This happens in the background so webhook responds quickly
+                  console.log(
+                    `[Workflow][Webhook] Triggering script generation workflow`,
+                    JSON.stringify({ responseId, ownerEmail: userEmail, clientCreated: true })
+                  );
+                  const workflowUrl = `${process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api')[0]}/api/workflows/script-generation`;
+                  fetch(workflowUrl, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      responseId: responseId,
+                      email: userEmail,
+                    }),
+                  }).catch((error) => {
+                    console.error(`[Workflow][Webhook] Failed to trigger script generation workflow for response ${responseId}:`, error);
+                    // Don't fail the webhook if script generation fails
+                  });
                 } catch (clientError) {
                   // Log but don't fail the webhook if client creation fails
-                  console.error(`Failed to create/update client for ${businessEmail || businessName}:`, clientError);
+                  console.error(`[Workflow][Webhook] Failed to create/update client for ${businessEmail || businessName}:`, clientError);
                 }
               }
             }
           } catch (responseError) {
             // Log but don't fail the webhook
-            console.error(`Failed to process form response:`, responseError);
+            console.error(`[Workflow][Webhook] Failed to process form response:`, responseError);
           }
         }
       }
     } catch (storageError) {
-      console.error(`Failed to store webhook for user ${userEmail}:`, storageError);
+      console.error(`[Workflow][Webhook] Failed to store webhook for user ${userEmail}:`, storageError);
       return NextResponse.json(
         { error: "Failed to store webhook payload in database" },
         { status: 500 }
