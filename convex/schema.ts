@@ -86,6 +86,12 @@ export default defineSchema({
     )),
     notes: v.optional(v.string()), // Notes/observations about the client
     
+    // Cron job configuration (per-client override)
+    // Not used directly - cron jobs are calculated as: 25 days, then 30 days later, then monthly
+    // This field is kept for backwards compatibility but the schedule is fixed
+    cronJobSchedule: v.optional(v.array(v.number())), // Deprecated - schedule is fixed: 25d, then 30d, then monthly
+    cronJobEnabled: v.optional(v.boolean()), // Whether cron jobs are enabled for this client
+    
     // Timestamps
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -172,6 +178,10 @@ export default defineSchema({
     autoGenerateOnSync: v.optional(v.boolean()),
     // A publicly reachable base URL for the Next.js app, used by Convex actions
     publicAppUrl: v.optional(v.string()),
+    // Cron job template: fixed schedule pattern
+    // Pattern: immediate, then 25 days, then 30 days later (which becomes monthly recurring day)
+    // This field is kept for backwards compatibility but the schedule is fixed
+    cronJobTemplate: v.optional(v.array(v.number())), // Deprecated - schedule is fixed: 25d, then 30d, then monthly
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_email", ["email"]),
@@ -201,6 +211,26 @@ export default defineSchema({
   })
     .index("by_owner", ["ownerEmail", "createdAt"])
     .index("by_owner_response", ["ownerEmail", "responseId"]),
+  cron_jobs: defineTable({
+    ownerEmail: v.string(),
+    clientId: v.id("clients"),
+    cronJobId: v.string(), // Cloudflare cron job ID
+    scheduledTime: v.number(), // Unix timestamp when this job should run
+    dayOfMonth: v.number(), // Day of month (1-31) for this job
+    isRepeating: v.boolean(), // Whether this is a repeating monthly job
+    status: v.union(
+      v.literal("scheduled"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("cancelled")
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_client", ["clientId"])
+    .index("by_owner", ["ownerEmail"])
+    .index("by_scheduled_time", ["scheduledTime"])
+    .index("by_status", ["status"]),
 });
 
 

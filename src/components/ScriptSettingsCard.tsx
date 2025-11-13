@@ -21,6 +21,7 @@ export default function ScriptSettingsCard({ email }: { email: string }) {
   const [thinkingEffort, setThinkingEffort] = React.useState<ThinkingEffort>("medium");
   const [autoGenerateOnSync, setAutoGenerateOnSync] = React.useState<boolean>(false);
   const [publicAppUrl, setPublicAppUrl] = React.useState<string>("");
+  // Cron job template is now fixed: 25 days, then 30 days later, then monthly
   const [isSaving, setIsSaving] = React.useState(false);
   const [isTesting, setIsTesting] = React.useState(false);
   const [testLogs, setTestLogs] = React.useState<LogEntry[]>([]);
@@ -41,6 +42,7 @@ export default function ScriptSettingsCard({ email }: { email: string }) {
       if (typeof settings.publicAppUrl === "string") {
         setPublicAppUrl(settings.publicAppUrl);
       }
+      // Cron job template is deprecated - schedule is now fixed
     }
   }, [settings]);
 
@@ -65,6 +67,7 @@ export default function ScriptSettingsCard({ email }: { email: string }) {
         defaultThinkingEffort: thinkingEffort,
         autoGenerateOnSync,
         publicAppUrl: trimmedUrl || undefined,
+        // cronJobTemplate is deprecated - schedule is fixed
       });
       
       // Show success feedback
@@ -202,6 +205,22 @@ export default function ScriptSettingsCard({ email }: { email: string }) {
           <p className="text-xs text-foreground/60">
             The reasoning effort level for models that support it. Higher effort may improve quality but increase cost and latency.
           </p>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm text-foreground/70">Cron Job Schedule</label>
+          <div className="rounded-md border border-foreground/10 bg-background/50 p-3">
+            <p className="text-xs text-foreground/70 font-medium mb-2">Fixed Schedule Pattern:</p>
+            <ul className="text-xs text-foreground/60 space-y-1 list-disc list-inside">
+              <li>Immediate script generation (when client is created)</li>
+              <li>25 days later - first cron job</li>
+              <li>30 days after that (55 days total) - second cron job</li>
+              <li>Then monthly on whatever day the 30-day mark falls on</li>
+            </ul>
+            <p className="text-xs text-foreground/50 mt-2">
+              Example: If client created Jan 1 → Script Jan 1, then Jan 26 (25d), then Feb 25 (30d later), then every 25th monthly.
+            </p>
+          </div>
         </div>
 
         <button

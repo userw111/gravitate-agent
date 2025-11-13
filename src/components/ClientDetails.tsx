@@ -3,9 +3,9 @@
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { extractClientInfo } from "@/lib/typeform";
+import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { useRouter } from "next/navigation";
-import * as React from "react";
 import type { Id } from "../../convex/_generated/dataModel";
 import UnlinkedTranscripts from "./UnlinkedTranscripts";
 import ScriptTabContent from "./ScriptTabContent";
@@ -105,6 +105,15 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
     client ? { clientId: client._id, ownerEmail: email } : "skip"
   );
   const totalScriptsGenerated = scriptCount ?? 0;
+  
+  // Get cron jobs for this client
+  const cronJobs = useQuery(
+    api.cronJobs.getCronJobsForClient,
+    client ? { clientId: client._id } : "skip"
+  );
+  
+  // Get settings (for backwards compatibility, but schedule is now fixed)
+  const settings = useQuery(api.scriptSettings.getSettingsForEmail, { email });
 
   // Initialize notes from client data
   React.useEffect(() => {
@@ -653,19 +662,56 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-foreground/60 font-light mb-1 block">Cadence</label>
+                    <label className="text-xs text-foreground/60 font-light mb-1 block">Cron Job Schedule</label>
                     <div className="space-y-2">
-                      <button className="w-full px-3 py-2 text-sm rounded-md border border-blue-500 bg-blue-50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-300 font-light">
-                        +25d then every 4w
-                      </button>
-                      <button className="w-full px-3 py-2 text-sm rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 font-light">
-                        Monthly fixed day
-                      </button>
-                      <button className="w-full px-3 py-2 text-sm rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 font-light">
-                        Custom...
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={client?.cronJobEnabled !== false}
+                          onChange={(e) => {
+                            if (client) {
+                              updateClient({
+                                clientId: client._id,
+                                cronJobEnabled: e.target.checked,
+                              });
+                            }
+                          }}
+                          className="rounded border-foreground/20"
+                        />
+                        <label className="text-xs text-foreground/60 font-light cursor-pointer">
+                          Enable cron jobs
+                        </label>
+                      </div>
+                      <div className="rounded-md border border-foreground/10 bg-background/30 p-2">
+                        <p className="text-xs text-foreground/70 font-medium mb-1">Fixed Schedule:</p>
+                        <ul className="text-xs text-foreground/60 space-y-0.5 list-disc list-inside">
+                          <li>Immediate (on creation)</li>
+                          <li>25 days later</li>
+                          <li>30 days after that (55d total)</li>
+                          <li>Then monthly on that day</li>
+                        </ul>
+                      </div>
+                      {cronJobs && cronJobs.length > 0 && cronJobs.some(j => j.isRepeating && j.status === "scheduled") && (
+                        <p className="text-xs text-foreground/50 font-light">
+                          Recurring monthly on day {cronJobs.find(j => j.isRepeating && j.status === "scheduled")?.dayOfMonth}
+                        </p>
+                      )}
                     </div>
                   </div>
+                  {cronJobs && cronJobs.length > 0 && (
+                    <div>
+                      <label className="text-xs text-foreground/60 font-light mb-1 block">Scheduled Jobs</label>
+                      <div className="space-y-1">
+                        {cronJobs
+                          .filter((job) => job.status === "scheduled")
+                          .map((job) => (
+                            <div key={job.cronJobId} className="text-xs text-foreground/70">
+                              {new Date(job.scheduledTime).toLocaleDateString()} (day {job.dayOfMonth}{job.isRepeating ? ", monthly" : ""})
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <label className="text-xs text-foreground/60 font-light mb-1 block">Next Script</label>
                     <div className="flex gap-2">

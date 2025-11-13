@@ -24,6 +24,7 @@ export const updateSettings = mutation({
     defaultThinkingEffort: v.optional(v.union(v.literal("low"), v.literal("medium"), v.literal("high"))),
     autoGenerateOnSync: v.optional(v.boolean()),
     publicAppUrl: v.optional(v.string()),
+    cronJobTemplate: v.optional(v.array(v.number())), // e.g., [15] for 15th of every month, [5, 20] for 5th and 20th
   },
   handler: async (ctx: MutationCtx, args) => {
     const existing = await ctx.db
@@ -39,6 +40,7 @@ export const updateSettings = mutation({
         ...(args.defaultThinkingEffort !== undefined && { defaultThinkingEffort: args.defaultThinkingEffort }),
         ...(args.autoGenerateOnSync !== undefined && { autoGenerateOnSync: args.autoGenerateOnSync }),
         ...(args.publicAppUrl !== undefined && { publicAppUrl: args.publicAppUrl }),
+        ...(args.cronJobTemplate !== undefined && { cronJobTemplate: args.cronJobTemplate }),
         updatedAt: now,
       });
       return existing._id;
@@ -50,6 +52,7 @@ export const updateSettings = mutation({
       defaultThinkingEffort: args.defaultThinkingEffort,
       autoGenerateOnSync: args.autoGenerateOnSync,
       publicAppUrl: args.publicAppUrl,
+      cronJobTemplate: args.cronJobTemplate,
       createdAt: now,
       updatedAt: now,
     });

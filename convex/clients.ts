@@ -138,6 +138,16 @@ export const upsertClientFromTypeform = mutation({
         ownerEmail: args.ownerEmail,
       });
     }
+    
+    // Schedule cron jobs for new clients (cron jobs are enabled by default if template exists)
+    // Use the client's createdAt as the base time
+    ctx.scheduler.runAfter(0, api.cronJobs.scheduleCronJobsForClient, {
+      clientId: newClientId,
+      ownerEmail: args.ownerEmail,
+      baseTime: now,
+    }).catch((error) => {
+      console.error(`[CronJobs] Failed to schedule cron jobs for new client ${newClientId}:`, error);
+    });
 
     return newClientId;
   },
@@ -363,6 +373,8 @@ export const updateClient = mutation({
       v.literal("inactive")
     )),
     notes: v.optional(v.string()),
+    cronJobSchedule: v.optional(v.array(v.number())), // e.g., [25, 30] for +25d then every 30d
+    cronJobEnabled: v.optional(v.boolean()),
   },
   handler: async (ctx: MutationCtx, args) => {
     console.log("[updateClient] Mutation called with args:", JSON.stringify(args, null, 2));
@@ -386,6 +398,8 @@ export const updateClient = mutation({
       targetRevenue?: number;
       status?: "active" | "paused" | "inactive";
       notes?: string;
+      cronJobSchedule?: number[];
+      cronJobEnabled?: boolean;
       updatedAt: number;
     } = {
       updatedAt: Date.now(),
@@ -422,10 +436,38 @@ export const updateClient = mutation({
     if (args.notes !== undefined) {
       updateData.notes = args.notes || undefined;
     }
+    if (args.cronJobSchedule !== undefined) {
+      updateData.cronJobSchedule = args.cronJobSchedule;
+    }
+    if (args.cronJobEnabled !== undefined) {
+      updateData.cronJobEnabled = args.cronJobEnabled;
+    }
 
     console.log("[updateClient] Final updateData:", JSON.stringify(updateData, null, 2));
 
     await ctx.db.patch(args.clientId, updateData);
+    
+    // If cron job schedule or enabled status changed, reschedule cron jobs
+    if (args.cronJobSchedule !== undefined || args.cronJobEnabled !== undefined) {
+      const updatedClient = await ctx.db.get(args.clientId);
+      if (updatedClient && updatedClient.cronJobEnabled !== false) {
+        // Schedule cron jobs in the background
+        ctx.scheduler.runAfter(0, api.cronJobs.scheduleCronJobsForClient, {
+          clientId: args.clientId,
+          ownerEmail: updatedClient.ownerEmail,
+          baseTime: updatedClient.createdAt,
+        }).catch((error) => {
+          console.error(`[updateClient] Failed to schedule cron jobs for client ${args.clientId}:`, error);
+        });
+      } else if (updatedClient && updatedClient.cronJobEnabled === false) {
+        // Cancel existing cron jobs (mutation, can be called directly)
+        await ctx.runMutation(api.cronJobs.cancelJobsForClient, {
+          clientId: args.clientId,
+        }).catch((error) => {
+          console.error(`[updateClient] Failed to cancel cron jobs for client ${args.clientId}:`, error);
+        });
+      }
+    }
 
     // Verify the update
     const updatedClient = await ctx.db.get(args.clientId);
@@ -441,6 +483,7 @@ export const updateClient = mutation({
 /**
  * Trigger script generation for a client
  * This action calls the Next.js API endpoint to generate a script
+ * Uses the client's onboardingResponseId to generate from Typeform response data
  */
 export const triggerScriptGeneration = action({
   args: {
@@ -457,12 +500,32 @@ export const triggerScriptGeneration = action({
       });
       return;
     }
+    
+    // Get the client to find the onboardingResponseId
+    const client = await ctx.runQuery(api.clients.getClientById, {
+      clientId: args.clientId,
+    });
+    
+    if (!client) {
+      console.error(`[Script Generation] Client not found: ${args.clientId}`);
+      return;
+    }
+    
+    // Use onboardingResponseId if available, otherwise fall back to client-based generation
+    const responseId = client.onboardingResponseId;
+    
+    if (!responseId) {
+      console.warn(`[Script Generation] Client ${args.clientId} has no onboardingResponseId, skipping script generation`);
+      return;
+    }
+    
     // Get the base URL from environment or use a default
     const baseUrl = settings?.publicAppUrl || process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL;
     console.log(
       "[Script Generation] triggerScriptGeneration",
       JSON.stringify({
         clientId: String(args.clientId),
+        responseId,
         ownerEmail: args.ownerEmail,
         source: settings?.publicAppUrl ? "settings" : ((process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL) ? "env" : "fallback"),
         NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL ? "set" : "unset",
@@ -478,15 +541,16 @@ export const triggerScriptGeneration = action({
       return;
     }
 
-    // Call the Next.js API endpoint to generate script
+    // Call the Next.js API endpoint to generate script from response
     // This runs asynchronously - we don't wait for the result
-    fetch(`${baseUrl.replace(/\/$/, "")}/api/scripts/generate-from-client`, {
+    fetch(`${baseUrl.replace(/\/$/, "")}/api/scripts/generate-from-response`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        clientId: args.clientId,
+        responseId: responseId,
+        clientId: String(args.clientId),
         email: args.ownerEmail,
       }),
     }).catch((error) => {
