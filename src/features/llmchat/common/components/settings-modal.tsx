@@ -1,19 +1,19 @@
 'use client';
-import { useMcpToolsStore } from '@repo@/features/llmchat/common/store';
-import { Alert, AlertDescription, DialogFooter } from '@repo@/features/llmchat/ui';
-import { Button } from '@repo@/features/llmchat/ui/src/components/button';
-import { IconBolt, IconBoltFilled, IconKey, IconSettings2, IconTrash } from '@tabler/icons-react';
+import { useMcpToolsStore } from '../store';
+import { Alert, AlertDescription, DialogFooter } from '../../ui';
+import { Button } from '../../ui/components/button';
+import { IconBolt, IconBoltFilled, IconKey, IconSettings2, IconTrash, IconWallet } from '@tabler/icons-react';
 
-import { Badge, Dialog, DialogContent, Input } from '@repo@/features/llmchat/ui';
+import { Badge, Dialog, DialogContent, Input } from '../../ui';
 
-import { useChatEditor } from '@repo@/features/llmchat/common/hooks';
-import moment from 'moment';
+import { useChatEditor } from '../hooks';
 import { useState } from 'react';
 import { ApiKeys, useApiKeysStore } from '../store/api-keys.store';
 import { SETTING_TABS, useAppStore } from '../store/app.store';
 import { useChatStore } from '../store/chat.store';
 import { ChatEditor } from './chat-input';
 import { BYOKIcon, ToolIcon } from './icons';
+import { OpenRouterBalance } from '../../../../components/OpenRouterBalance';
 
 export const SettingsModal = () => {
     const isSettingOpen = useAppStore(state => state.isSettingsOpen);
@@ -40,6 +40,12 @@ export const SettingsModal = () => {
             key: SETTING_TABS.API_KEYS,
             component: <ApiKeySettings />,
         },
+        {
+            icon: <IconWallet size={16} strokeWidth={2} className="text-muted-foreground" />,
+            title: 'OpenRouter',
+            key: SETTING_TABS.OPENROUTER,
+            component: <OpenRouterSettings />,
+        },
         // {
         //     title: 'MCP Tools',
         //     key: SETTING_TABS.MCP_TOOLS,
@@ -51,7 +57,7 @@ export const SettingsModal = () => {
         <Dialog open={isSettingOpen} onOpenChange={() => setIsSettingOpen(false)}>
             <DialogContent
                 ariaTitle="Settings"
-                className="h-full max-h-[600px] !max-w-[760px] overflow-x-hidden rounded-xl p-0"
+                className="h-full max-h-[600px] max-w-[760px]! overflow-x-hidden rounded-xl p-0"
             >
                 <div className="no-scrollbar relative max-w-full overflow-y-auto overflow-x-hidden">
                     <h3 className="border-border mx-5 border-b py-4 text-lg font-bold">Settings</h3>
@@ -231,7 +237,7 @@ const AddToolDialog = ({ isOpen, onOpenChange, onAddTool }: AddToolDialogProps) 
 
     return (
         <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-            <DialogContent ariaTitle="Add MCP Tool" className="!max-w-md">
+            <DialogContent ariaTitle="Add MCP Tool" className="max-w-md!">
                 <div className="flex flex-col gap-4">
                     <h3 className="text-lg font-bold">Add New MCP Tool</h3>
 
@@ -403,6 +409,75 @@ export const ApiKeySettings = () => {
     );
 };
 
+export const OpenRouterSettings = () => {
+    return (
+        <div className="flex flex-col gap-6">
+            <div className="flex flex-col">
+                <h2 className="flex items-center gap-1 text-base font-semibold">
+                    OpenRouter
+                </h2>
+
+                <p className="text-muted-foreground text-xs">
+                    Manage your OpenRouter account balance and settings for AI chat requests.
+                </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Account Balance:</span>
+                    <OpenRouterBalance />
+                </div>
+                <p className="text-muted-foreground text-xs">
+                    Your current OpenRouter account balance. This balance is used for AI chat requests when you don't have API keys configured.
+                </p>
+            </div>
+
+            <div className="mt-4 border-t border-foreground/10 pt-4">
+                <p className="text-muted-foreground text-xs mb-2">Learn more:</p>
+                <a
+                    href="https://openrouter.ai"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-blue-400 underline-offset-2 hover:underline"
+                >
+                    Visit OpenRouter →
+                </a>
+            </div>
+        </div>
+    );
+};
+
+function formatRelativeTime(date: number | Date | string): string {
+    const now = Date.now();
+    let target: number;
+    if (typeof date === 'number') {
+        target = date;
+    } else if (typeof date === 'string') {
+        target = new Date(date).getTime();
+    } else {
+        target = date.getTime();
+    }
+    const diffMs = target - now;
+    const diffSeconds = Math.floor(diffMs / 1000);
+    const diffMinutes = Math.floor(diffSeconds / 60);
+    const diffHours = Math.floor(diffMinutes / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (Math.abs(diffSeconds) < 60) {
+        return diffSeconds >= 0 ? 'in a few seconds' : 'a few seconds ago';
+    }
+    if (Math.abs(diffMinutes) < 60) {
+        const minutes = Math.abs(diffMinutes);
+        return diffMinutes >= 0 ? `in ${minutes} minute${minutes !== 1 ? 's' : ''}` : `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
+    }
+    if (Math.abs(diffHours) < 24) {
+        const hours = Math.abs(diffHours);
+        return diffHours >= 0 ? `in ${hours} hour${hours !== 1 ? 's' : ''}` : `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+    }
+    const days = Math.abs(diffDays);
+    return diffDays >= 0 ? `in ${days} day${days !== 1 ? 's' : ''}` : `${days} day${days !== 1 ? 's' : ''} ago`;
+}
+
 export const CreditsSettings = () => {
     const remainingCredits = useChatStore(state => state.creditLimit.remaining);
     const maxLimit = useChatStore(state => state.creditLimit.maxLimit);
@@ -430,7 +505,7 @@ export const CreditsSettings = () => {
         },
         {
             title: 'Next reset',
-            value: moment(resetDate).fromNow(),
+            value: resetDate ? formatRelativeTime(resetDate) : 'N/A',
         },
     ];
 

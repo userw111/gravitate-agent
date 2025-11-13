@@ -308,6 +308,15 @@ export const syncTypeformResponses = action({
     formId: v.string(),
   },
   handler: async (ctx: ActionCtx, args): Promise<{ synced: number; skipped: number; total: number }> => {
+    // Load per-user settings to determine if auto-generation is enabled
+    const userSettings: { autoGenerateOnSync?: boolean } | null = await ctx.runQuery(api.scriptSettings.getSettingsForEmail, {
+      email: args.email,
+    });
+    const autoGenEnabled = userSettings?.autoGenerateOnSync === true;
+    console.log("[Workflow][Sync] Auto-generation setting loaded.", {
+      email: args.email,
+      autoGenEnabled,
+    } as any);
     // Get user's access token from config
     const config: { accessToken?: string } | null = await ctx.runQuery(api.typeform.getConfigForEmail, {
       email: args.email,
@@ -345,6 +354,8 @@ export const syncTypeformResponses = action({
     let total = 0;
     let after: string | undefined = undefined;
     let hasMore = true;
+    // Collect responseIds that need script generation
+    const responseIdsToGenerate: Array<{ responseId: string; ownerEmail: string }> = [];
 
     // Fetch all responses with pagination
     while (hasMore) {
@@ -403,13 +414,20 @@ export const syncTypeformResponses = action({
           });
           
           // Create Q&A pairs from answers and questions
-          const responsePayload = item as { answers?: Array<{ field?: { id?: string; ref?: string }; text?: string }> };
+          const responsePayload = item as { answers?: Array<{ field?: { id?: string; ref?: string; type?: string }; text?: string; email?: string; number?: number; boolean?: boolean; url?: string }> };
           const qaPairs = responsePayload.answers?.map((answer) => {
             const ref = answer.field?.ref;
             const field = ref ? fieldMap.get(ref) : null;
+            const value = (
+              (answer as any).text ??
+              (answer as any).email ??
+              (answer as any).url ??
+              (typeof (answer as any).number === "number" ? String((answer as any).number) : undefined) ??
+              (typeof (answer as any).boolean === "boolean" ? String((answer as any).boolean) : "")
+            ) || "";
             return {
               question: field?.title || ref || "Unknown Question",
-              answer: answer.text || "",
+              answer: value || "",
               fieldRef: ref,
             };
           }) || [];
@@ -489,7 +507,7 @@ export const syncTypeformResponses = action({
                   break;
                 case "businessEmail":
                   if (value) {
-                    businessEmail = value.toLowerCase();
+                    businessEmail = value.toLowerCase().trim();
                   }
                     break;
                 case "contactFirstName": {
@@ -532,6 +550,23 @@ export const syncTypeformResponses = action({
               }
             }
             
+            // Fallback: if businessEmail is still missing, try to read it directly from payload answers
+            if (!businessEmail && responsePayload.answers && Array.isArray(responsePayload.answers)) {
+              // Prefer the specific email fieldRef if present
+              const EMAIL_FIELD_REF = "a0e9781d-38e4-4768-af2c-19a4518d2ac7";
+              const emailAnswerByRef = responsePayload.answers.find(
+                (a) => (a.field?.ref?.trim() === EMAIL_FIELD_REF) && typeof (a as any).email === "string" && (a as any).email.trim().length > 0
+              ) as any;
+              const emailAnswerAny = responsePayload.answers.find(
+                (a) => (a.field?.type === "email" || typeof (a as any).email === "string") && (a as any).email && (a as any).email.trim().length > 0
+              ) as any;
+              const fallbackEmail = (emailAnswerByRef?.email || emailAnswerAny?.email || "").toLowerCase().trim();
+              if (fallbackEmail) {
+                businessEmail = fallbackEmail;
+                console.log(`[Typeform][Sync] Fallback captured businessEmail from payload answers for ${responseId}: ${businessEmail}`);
+              }
+            }
+            
             // Create/update client if we have business name (businessEmail is optional)
             if (businessName) {
               try {
@@ -545,31 +580,31 @@ export const syncTypeformResponses = action({
                   targetRevenue: targetRevenue || undefined,
                 });
                 
-                // Trigger script generation via Cloudflare Workflow (or fallback to direct)
-                // This happens in the background so sync doesn't slow down
-                const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
-                if (baseUrl) {
-                  console.log(
-                    `[Workflow][Sync] Triggering script generation workflow`,
-                    JSON.stringify({ responseId, ownerEmail: args.email, clientCreated: true })
-                  );
-                  // Fire and forget - don't wait for script generation
-                  // Use workflow endpoint which will use Workflows if configured, or fallback to direct
-                  fetch(`${baseUrl.replace(/\/$/, "")}/api/workflows/script-generation`, {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                      responseId: responseId,
-                      email: args.email, // Pass email for internal auth
-                    }),
-                  }).catch((error) => {
-                    console.error(`[Workflow][Sync] Failed to trigger script generation workflow for response ${responseId}:`, error);
-                    // Don't fail the sync if script generation fails
+                // Collect responseId for script generation if:
+                // 1. Auto-gen is enabled
+                // 2. No script already exists for this responseId
+                if (autoGenEnabled) {
+                  // Check if script already exists (idempotency)
+                  const existingScript = await ctx.runQuery(api.scripts.getScriptByResponseId, {
+                    responseId,
+                    ownerEmail: args.email,
                   });
-                } else {
-                  console.warn(`[Workflow][Sync] NEXT_PUBLIC_APP_URL not set, skipping script generation for ${responseId}`);
+                  
+                  if (!existingScript) {
+                    responseIdsToGenerate.push({
+                      responseId: responseId,
+                      ownerEmail: args.email,
+                    });
+                    console.log(
+                      `[Workflow][Sync] Queued script generation for response`,
+                      JSON.stringify({ responseId, ownerEmail: args.email, isNewResponse: !existingResponse })
+                    );
+                  } else {
+                    console.log(
+                      `[Workflow][Sync] Script already exists for response, skipping`,
+                      JSON.stringify({ responseId, scriptId: existingScript._id })
+                    );
+                  }
                 }
               } catch (clientError) {
                 // Log but don't fail the sync if client creation fails
@@ -594,6 +629,58 @@ export const syncTypeformResponses = action({
           hasMore = false;
         }
       }
+    }
+
+    // Trigger script generation for all collected responseIds
+    // Trigger them in parallel but await to ensure they complete (or fail gracefully)
+    if (autoGenEnabled && responseIdsToGenerate.length > 0) {
+      console.log(
+        `[Workflow][Sync] Triggering script generation for ${responseIdsToGenerate.length} responses`
+      );
+      
+      // Trigger all script generations in parallel
+      // Use Promise.allSettled to ensure all are attempted even if some fail
+      const results = await Promise.allSettled(
+        responseIdsToGenerate.map(({ responseId, ownerEmail }) =>
+          ctx.runAction(api.scriptGeneration.triggerScriptGenerationFromResponse, {
+            responseId,
+            ownerEmail,
+          }).catch((error) => {
+            console.error(
+              `[Workflow][Sync] Failed to trigger script generation for ${responseId}:`,
+              error instanceof Error ? error.message : String(error)
+            );
+            // Return error info instead of throwing
+            return { success: false, error: error instanceof Error ? error.message : String(error) };
+          })
+        )
+      );
+      
+      const succeeded = results.filter(
+        (r) => r.status === "fulfilled" && r.value && (r.value as any).success !== false
+      ).length;
+      const failed = results.length - succeeded;
+      console.log(
+        `[Workflow][Sync] Script generation results: ${succeeded} succeeded, ${failed} failed out of ${results.length} total`
+      );
+      // Emit per-response result diagnostics
+      results.forEach((r, idx) => {
+        const info = responseIdsToGenerate[idx];
+        if (r.status === "fulfilled") {
+          const val = r.value as any;
+          if (val?.success) {
+            console.log("[Workflow][Sync] Script generation trigger OK", JSON.stringify({ responseId: info.responseId, ownerEmail: info.ownerEmail }));
+          } else {
+            console.warn("[Workflow][Sync] Script generation trigger FAILED", JSON.stringify({ responseId: info.responseId, ownerEmail: info.ownerEmail, error: val?.error || "unknown" }));
+          }
+        } else {
+          console.error("[Workflow][Sync] Script generation trigger REJECTED", JSON.stringify({ responseId: info.responseId, ownerEmail: info.ownerEmail, reason: r.reason instanceof Error ? r.reason.message : String(r.reason) }));
+        }
+      });
+    } else if (!autoGenEnabled && responseIdsToGenerate.length > 0) {
+      console.log("[Workflow][Sync] Auto-generation disabled. Skipping script generation for collected responses.", {
+        count: responseIdsToGenerate.length,
+      } as any);
     }
 
     return { synced, skipped, total };

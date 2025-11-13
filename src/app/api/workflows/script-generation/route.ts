@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     };
 
     // Create workflow via Cloudflare API
-    console.log("[Workflow][API] Creating Cloudflare workflow...");
+    console.log("[Workflow][API] Creating Cloudflare workflow...", JSON.stringify({ accountId: !!CLOUDFLARE_ACCOUNT_ID, hasToken: !!CLOUDFLARE_API_TOKEN, script: WORKFLOW_SCRIPT_NAME }));
     const workflowResponse = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workflows`,
       {
@@ -146,8 +146,10 @@ async function executeDirectly(
     "[Workflow][API] Falling back to direct API execution",
     JSON.stringify({ responseId, email, url: `${baseUrl}/api/scripts/generate-from-response` })
   );
+  const directUrl = `${baseUrl}/api/scripts/generate-from-response`;
+  console.log("[Workflow][API] Calling direct API", JSON.stringify({ url: directUrl, responseId, email }));
   const response = await fetch(
-    `${baseUrl}/api/scripts/generate-from-response`,
+    directUrl,
     {
       method: "POST",
       headers: {
@@ -170,7 +172,7 @@ async function executeDirectly(
     );
   }
 
-  console.log("[Workflow][API] Direct API execution started successfully");
+  console.log("[Workflow][API] Direct API execution started successfully", JSON.stringify({ status: response.status }));
   return NextResponse.json({
     success: true,
     message: "Script generation initiated (direct execution)",

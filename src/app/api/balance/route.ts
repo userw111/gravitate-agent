@@ -15,8 +15,6 @@ export async function GET() {
       },
     });
 
-    console.log("[Balance API] Response status:", res.status, res.statusText);
-
     if (!res.ok) {
       const errorText = await res.text();
       console.error("[Balance API] Error response:", errorText);
@@ -27,7 +25,6 @@ export async function GET() {
     }
 
     const rawData = await res.json();
-    console.log("[Balance API] Raw response data:", JSON.stringify(rawData, null, 2));
 
     const data = rawData as {
       data?: {
@@ -71,13 +68,6 @@ export async function GET() {
             ? Number(rawBalance)
             : null;
     }
-
-    console.log("[Balance API] Extracted balance:", {
-      totalCredits,
-      totalUsage,
-      balance,
-      balanceType: typeof balance,
-    });
 
     return new Response(JSON.stringify({ balance }), {
       status: 200,

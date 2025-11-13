@@ -168,9 +168,39 @@ export default defineSchema({
     email: v.string(),
     defaultModel: v.optional(v.string()), // Default model for script generation
     defaultThinkingEffort: v.optional(v.union(v.literal("low"), v.literal("medium"), v.literal("high"))),
+    // Feature flags / preferences
+    autoGenerateOnSync: v.optional(v.boolean()),
+    // A publicly reachable base URL for the Next.js app, used by Convex actions
+    publicAppUrl: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_email", ["email"]),
+  script_generation_runs: defineTable({
+    ownerEmail: v.string(),
+    responseId: v.optional(v.string()),
+    clientId: v.optional(v.id("clients")),
+    // high-level status of the run
+    status: v.union(
+      v.literal("queued"),
+      v.literal("started"),
+      v.literal("generating"),
+      v.literal("storing"),
+      v.literal("completed"),
+      v.literal("failed")
+    ),
+    error: v.optional(v.string()),
+    // steps timeline for detailed visibility
+    steps: v.optional(v.array(v.object({
+      name: v.string(),
+      status: v.union(v.literal("pending"), v.literal("running"), v.literal("success"), v.literal("error")),
+      timestamp: v.number(),
+      detail: v.optional(v.string()),
+    }))),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner", ["ownerEmail", "createdAt"])
+    .index("by_owner_response", ["ownerEmail", "responseId"]),
 });
 
 

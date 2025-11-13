@@ -14,20 +14,15 @@ export function OpenRouterBalance() {
         setIsLoading(true);
         setError(null);
         const res = await fetch("/api/balance");
-        console.log("[Balance Component] Response status:", res.status, res.ok);
         if (!res.ok) {
           const errorText = await res.text();
-          console.error("[Balance Component] Error response:", errorText);
           throw new Error("Failed to fetch balance");
         }
         const data = (await res.json()) as { balance?: number };
-        console.log("[Balance Component] Received data:", data);
         const balanceValue = typeof data.balance === "number" ? data.balance : null;
-        console.log("[Balance Component] Setting balance:", balanceValue);
         setBalance(balanceValue);
       } catch (err) {
         setError("Error");
-        console.error("Failed to fetch balance:", err);
       } finally {
         setIsLoading(false);
       }

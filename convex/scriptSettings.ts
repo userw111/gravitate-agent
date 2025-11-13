@@ -22,6 +22,8 @@ export const updateSettings = mutation({
     email: v.string(),
     defaultModel: v.optional(v.string()),
     defaultThinkingEffort: v.optional(v.union(v.literal("low"), v.literal("medium"), v.literal("high"))),
+    autoGenerateOnSync: v.optional(v.boolean()),
+    publicAppUrl: v.optional(v.string()),
   },
   handler: async (ctx: MutationCtx, args) => {
     const existing = await ctx.db
@@ -35,6 +37,8 @@ export const updateSettings = mutation({
       await ctx.db.patch(existing._id, {
         ...(args.defaultModel !== undefined && { defaultModel: args.defaultModel }),
         ...(args.defaultThinkingEffort !== undefined && { defaultThinkingEffort: args.defaultThinkingEffort }),
+        ...(args.autoGenerateOnSync !== undefined && { autoGenerateOnSync: args.autoGenerateOnSync }),
+        ...(args.publicAppUrl !== undefined && { publicAppUrl: args.publicAppUrl }),
         updatedAt: now,
       });
       return existing._id;
@@ -44,6 +48,8 @@ export const updateSettings = mutation({
       email: args.email,
       defaultModel: args.defaultModel,
       defaultThinkingEffort: args.defaultThinkingEffort,
+      autoGenerateOnSync: args.autoGenerateOnSync,
+      publicAppUrl: args.publicAppUrl,
       createdAt: now,
       updatedAt: now,
     });

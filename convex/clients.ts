@@ -1,5 +1,6 @@
-import { mutation, query, QueryCtx, MutationCtx } from "./_generated/server";
+import { mutation, query, QueryCtx, MutationCtx, action, ActionCtx } from "./_generated/server";
 import { v } from "convex/values";
+import { api } from "./_generated/api";
 
 /**
  * Get all clients for an owner
@@ -105,7 +106,7 @@ export const upsertClientFromTypeform = mutation({
       return existing._id;
     }
 
-    return await ctx.db.insert("clients", {
+    const newClientId = await ctx.db.insert("clients", {
       ownerEmail: args.ownerEmail,
       businessEmail: args.businessEmail,
       businessName: args.businessName,
@@ -117,6 +118,28 @@ export const upsertClientFromTypeform = mutation({
       createdAt: now,
       updatedAt: now,
     });
+
+    // Trigger script generation for new clients (not updates) if enabled in user settings
+    const settings = await ctx.db
+      .query("script_settings")
+      .withIndex("by_email", (q) => q.eq("email", args.ownerEmail))
+      .unique();
+    const autoGenEnabled = settings?.autoGenerateOnSync === true;
+    if (autoGenEnabled) {
+      ctx.scheduler.runAfter(0, api.clients.triggerScriptGeneration, {
+        clientId: newClientId,
+        ownerEmail: args.ownerEmail,
+      }).catch((error) => {
+        console.error(`[Script Generation] Failed to schedule script generation for client ${newClientId}:`, error);
+      });
+    } else {
+      console.log("[Script Generation] Auto-generation disabled in user settings. Skipping client trigger.", {
+        clientId: String(newClientId),
+        ownerEmail: args.ownerEmail,
+      });
+    }
+
+    return newClientId;
   },
 });
 
@@ -412,6 +435,64 @@ export const updateClient = mutation({
     });
 
     return args.clientId;
+  },
+});
+
+/**
+ * Trigger script generation for a client
+ * This action calls the Next.js API endpoint to generate a script
+ */
+export const triggerScriptGeneration = action({
+  args: {
+    clientId: v.id("clients"),
+    ownerEmail: v.string(),
+  },
+  handler: async (ctx: ActionCtx, args): Promise<void> => {
+    // Respect per-user settings
+    const settings = await ctx.runQuery(api.scriptSettings.getSettingsForEmail, { email: args.ownerEmail });
+    if (settings?.autoGenerateOnSync !== true) {
+      console.log("[Script Generation] Auto-generation disabled in user settings. Skipping triggerScriptGeneration.", {
+        clientId: String(args.clientId),
+        ownerEmail: args.ownerEmail,
+      });
+      return;
+    }
+    // Get the base URL from environment or use a default
+    const baseUrl = settings?.publicAppUrl || process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL;
+    console.log(
+      "[Script Generation] triggerScriptGeneration",
+      JSON.stringify({
+        clientId: String(args.clientId),
+        ownerEmail: args.ownerEmail,
+        source: settings?.publicAppUrl ? "settings" : ((process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL) ? "env" : "fallback"),
+        NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL ? "set" : "unset",
+        APP_URL: process.env.APP_URL ? "set" : "unset",
+        baseUrl: baseUrl || null,
+      })
+    );
+    if (!baseUrl) {
+      console.warn(
+        "[Script Generation] Base URL not set in Convex env (set NEXT_PUBLIC_APP_URL or APP_URL). Skipping.",
+        JSON.stringify({ clientId: String(args.clientId), ownerEmail: args.ownerEmail })
+      );
+      return;
+    }
+
+    // Call the Next.js API endpoint to generate script
+    // This runs asynchronously - we don't wait for the result
+    fetch(`${baseUrl.replace(/\/$/, "")}/api/scripts/generate-from-client`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        clientId: args.clientId,
+        email: args.ownerEmail,
+      }),
+    }).catch((error) => {
+      console.error(`[Script Generation] Failed to trigger script generation for client ${args.clientId}:`, error);
+      // Don't throw - script generation failure shouldn't break client creation
+    });
   },
 });
 

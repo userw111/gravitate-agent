@@ -1,6 +1,7 @@
 import { mutation, query, QueryCtx, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
+import { api } from "./_generated/api";
 
 // Tables that are allowed for database operations
 const ALLOWED_TABLES = [
@@ -156,8 +157,8 @@ export const createRecord = mutation({
     const now = Date.now();
 
     switch (args.table) {
-      case "clients":
-        return await ctx.db.insert("clients", {
+      case "clients": {
+        const clientId = await ctx.db.insert("clients", {
           ownerEmail: args.ownerEmail,
           businessEmail: args.data.businessEmail || undefined,
           businessName: args.data.businessName,
@@ -169,6 +170,22 @@ export const createRecord = mutation({
           createdAt: now,
           updatedAt: now,
         });
+
+        // Trigger script generation for new clients
+        // Use scheduler to call the action asynchronously
+        try {
+          ctx.scheduler.runAfter(0, api.clients.triggerScriptGeneration, {
+            clientId,
+            ownerEmail: args.ownerEmail,
+          });
+        } catch (error) {
+          // If scheduler is not available, log and continue
+          // Script generation will be handled by the API route if needed
+          console.warn(`[Script Generation] Failed to schedule script generation for client ${clientId}:`, error);
+        }
+
+        return clientId;
+      }
 
       case "fireflies_transcripts":
         return await ctx.db.insert("fireflies_transcripts", {

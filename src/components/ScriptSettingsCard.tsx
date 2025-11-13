@@ -19,6 +19,8 @@ export default function ScriptSettingsCard({ email }: { email: string }) {
   const updateSettings = useMutation(api.scriptSettings.updateSettings);
   const [selectedModel, setSelectedModel] = React.useState("openai/gpt-5");
   const [thinkingEffort, setThinkingEffort] = React.useState<ThinkingEffort>("medium");
+  const [autoGenerateOnSync, setAutoGenerateOnSync] = React.useState<boolean>(false);
+  const [publicAppUrl, setPublicAppUrl] = React.useState<string>("");
   const [isSaving, setIsSaving] = React.useState(false);
   const [isTesting, setIsTesting] = React.useState(false);
   const [testLogs, setTestLogs] = React.useState<LogEntry[]>([]);
@@ -33,23 +35,48 @@ export default function ScriptSettingsCard({ email }: { email: string }) {
       if (settings.defaultThinkingEffort) {
         setThinkingEffort(settings.defaultThinkingEffort);
       }
+      if (typeof settings.autoGenerateOnSync === "boolean") {
+        setAutoGenerateOnSync(settings.autoGenerateOnSync);
+      }
+      if (typeof settings.publicAppUrl === "string") {
+        setPublicAppUrl(settings.publicAppUrl);
+      }
     }
   }, [settings]);
 
   const handleSave = React.useCallback(async () => {
     setIsSaving(true);
     try {
+      // Validate URL if provided
+      const trimmedUrl = publicAppUrl?.trim();
+      if (trimmedUrl && trimmedUrl.length > 0) {
+        try {
+          new URL(trimmedUrl); // Validate URL format
+        } catch (urlError) {
+          alert(`Invalid URL format: ${trimmedUrl}. Please enter a valid URL (e.g., https://example.com)`);
+          setIsSaving(false);
+          return;
+        }
+      }
+      
       await updateSettings({
         email,
         defaultModel: selectedModel,
         defaultThinkingEffort: thinkingEffort,
+        autoGenerateOnSync,
+        publicAppUrl: trimmedUrl || undefined,
       });
+      
+      // Show success feedback
+      alert("Settings saved successfully!");
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("Failed to save script settings:", error);
+      alert(`Failed to save settings: ${errorMessage}`);
     } finally {
       setIsSaving(false);
     }
-  }, [email, selectedModel, thinkingEffort, updateSettings]);
+  }, [email, selectedModel, thinkingEffort, autoGenerateOnSync, publicAppUrl, updateSettings]);
 
   const handleTestFlow = React.useCallback(async () => {
     setIsTesting(true);
@@ -128,6 +155,39 @@ export default function ScriptSettingsCard({ email }: { email: string }) {
       </p>
 
       <div className="space-y-4">
+        <div className="space-y-2">
+          <label className="text-sm text-foreground/70">Auto-generate scripts on Typeform sync</label>
+          <select
+            className="w-full px-3 py-2 rounded-md border border-foreground/15 bg-background text-sm"
+            value={autoGenerateOnSync ? "enabled" : "disabled"}
+            onChange={(e) => setAutoGenerateOnSync(e.target.value === "enabled")}
+          >
+            <option value="disabled">Disabled</option>
+            <option value="enabled">Enabled</option>
+          </select>
+          <p className="text-xs text-foreground/60">
+            Choose whether new Typeform responses should automatically create a client (if needed) and generate a script.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm text-foreground/70">Public App URL</label>
+          <input
+            type="url"
+            placeholder="https://cancellation-sizes-conversion-plant.trycloudflare.com"
+            className="w-full px-3 py-2 rounded-md border border-foreground/15 bg-background text-xs font-mono"
+            value={publicAppUrl}
+            onChange={(e) => setPublicAppUrl(e.target.value)}
+          />
+          <p className="text-xs text-foreground/60">
+            Used by background jobs to call your Next.js APIs. Must be reachable from the internet (e.g., Cloudflared tunnel). Example: https://cancellation-sizes-conversion-plant.trycloudflare.com
+          </p>
+          {publicAppUrl && (
+            <p className="text-xs text-green-600 dark:text-green-400">
+              Current value: {publicAppUrl}
+            </p>
+          )}
+        </div>
         <div className="space-y-2">
           <label className="text-sm text-foreground/70">Default Model</label>
           <ModelSelector value={selectedModel} onValueChange={setSelectedModel} />

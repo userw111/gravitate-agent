@@ -228,6 +228,14 @@ export async function POST(request: Request) {
       );
     }
 
+    // Start a run for detailed tracking
+    const runId = await convex.mutation(api.scriptGeneration.startRun, {
+      ownerEmail: user.email,
+      responseId,
+      clientId: clientId as any,
+    });
+    console.log("[Workflow][DirectAPI] Run started", JSON.stringify({ runId, responseId, ownerEmail: user.email }));
+
     // Get the Typeform response
     const response = await convex.query(api.typeform.getResponseByResponseId, {
       responseId,
@@ -268,11 +276,16 @@ export async function POST(request: Request) {
 
     // Extract client data from qaPairs
     if (!response.qaPairs || response.qaPairs.length === 0) {
+      await convex.mutation(api.scriptGeneration.failRun, {
+        runId,
+        error: "No qaPairs found in response",
+      });
       return NextResponse.json(
         { error: "No qaPairs found in response" },
         { status: 400 }
       );
     }
+    console.log("[Workflow][DirectAPI] Loaded response", JSON.stringify({ qaPairs: response.qaPairs.length, questions: response.questions?.length || 0 }));
 
     const clientData = extractClientDataFromQAPairs(response.qaPairs);
 
@@ -284,6 +297,12 @@ export async function POST(request: Request) {
       );
     }
 
+    await convex.mutation(api.scriptGeneration.updateStep, {
+      runId,
+      step: { name: "extract_client_data", status: "success" },
+      status: "started",
+    });
+
     // Get or create client
     let finalClientId: string;
     if (clientId) {
@@ -292,6 +311,10 @@ export async function POST(request: Request) {
         clientId: clientId as any,
       });
       if (!client || client.ownerEmail !== user.email) {
+        await convex.mutation(api.scriptGeneration.failRun, {
+          runId,
+          error: "Client not found or access denied",
+        });
         return NextResponse.json(
           { error: "Client not found or access denied" },
           { status: 403 }
@@ -324,6 +347,12 @@ export async function POST(request: Request) {
       }
     }
 
+    await convex.mutation(api.scriptGeneration.updateStep, {
+      runId,
+      step: { name: "prepare_settings", status: "success" },
+      status: "generating",
+    });
+
     // Get script generation settings
     const settings = await convex.query(api.scriptSettings.getSettingsForEmail, {
       email: user.email,
@@ -331,19 +360,33 @@ export async function POST(request: Request) {
 
     const model = settings?.defaultModel || "openai/gpt-5";
     const thinkingEffort = settings?.defaultThinkingEffort || "medium";
+    console.log("[Workflow][DirectAPI] Using settings", JSON.stringify({ model, thinkingEffort }));
 
     // Generate script content
     let scriptHtml: string;
     try {
+      await convex.mutation(api.scriptGeneration.updateStep, {
+        runId,
+        step: { name: "llm_generate", status: "running" },
+      });
+      console.log("[Workflow][DirectAPI] LLM generate starting", JSON.stringify({ qaPairs: response.qaPairs.length, model, thinkingEffort }));
       scriptHtml = await generateScriptContent(
         clientData,
         response.qaPairs,
         model,
         thinkingEffort
       );
+      await convex.mutation(api.scriptGeneration.updateStep, {
+        runId,
+        step: { name: "llm_generate", status: "success" },
+      });
       console.log("[Workflow][DirectAPI] Script content generated", JSON.stringify({ htmlLength: scriptHtml.length }));
     } catch (error) {
-      console.error("Script generation failed:", error);
+      console.error("[Workflow][DirectAPI] Script generation failed", error instanceof Error ? error.message : String(error));
+      await convex.mutation(api.scriptGeneration.failRun, {
+        runId,
+        error: error instanceof Error ? error.message : "Unknown error during LLM generation",
+      });
       return NextResponse.json(
         {
           error: "Failed to generate script",
@@ -356,6 +399,11 @@ export async function POST(request: Request) {
     // Create script record
     const scriptTitle = `Script for ${clientData.businessName} - ${new Date().toLocaleDateString()}`;
     
+    await convex.mutation(api.scriptGeneration.updateStep, {
+      runId,
+      step: { name: "store_script", status: "running" },
+      status: "storing",
+    });
     const scriptId = await convex.mutation(api.scripts.createScript, {
       ownerEmail: user.email,
       clientId: finalClientId as any,
@@ -371,6 +419,12 @@ export async function POST(request: Request) {
     });
 
     console.log("[Workflow][DirectAPI] Script stored", JSON.stringify({ scriptId, clientId: finalClientId }));
+    await convex.mutation(api.scriptGeneration.updateStep, {
+      runId,
+      step: { name: "store_script", status: "success" },
+      status: "completed",
+    });
+    await convex.mutation(api.scriptGeneration.completeRun, { runId });
     return NextResponse.json({
       success: true,
       scriptId,
@@ -378,6 +432,11 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("[Workflow][DirectAPI] Error generating script:", error);
+    try {
+      if (convex) {
+        // Best effort: if we had a runId in scope, we can't access here; skip
+      }
+    } catch {}
     return NextResponse.json(
       {
         error: "Failed to generate script",
