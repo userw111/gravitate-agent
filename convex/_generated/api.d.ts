@@ -13,6 +13,7 @@ import type * as cronJobs from "../cronJobs.js";
 import type * as database from "../database.js";
 import type * as fireflies from "../fireflies.js";
 import type * as firefliesActions from "../firefliesActions.js";
+import type * as googleDrive from "../googleDrive.js";
 import type * as scriptGeneration from "../scriptGeneration.js";
 import type * as scriptSettings from "../scriptSettings.js";
 import type * as scripts from "../scripts.js";
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   database: typeof database;
   fireflies: typeof fireflies;
   firefliesActions: typeof firefliesActions;
+  googleDrive: typeof googleDrive;
   scriptGeneration: typeof scriptGeneration;
   scriptSettings: typeof scriptSettings;
   scripts: typeof scripts;

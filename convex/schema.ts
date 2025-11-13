@@ -91,6 +91,8 @@ export default defineSchema({
     // This field is kept for backwards compatibility but the schedule is fixed
     cronJobSchedule: v.optional(v.array(v.number())), // Deprecated - schedule is fixed: 25d, then 30d, then monthly
     cronJobEnabled: v.optional(v.boolean()), // Whether cron jobs are enabled for this client
+    // Optional pause window; when set, UI can indicate resume time
+    pausedUntil: v.optional(v.number()),
     
     // Timestamps
     createdAt: v.number(),
@@ -230,7 +232,18 @@ export default defineSchema({
     .index("by_client", ["clientId"])
     .index("by_owner", ["ownerEmail"])
     .index("by_scheduled_time", ["scheduledTime"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_cron_id", ["cronJobId"]),
+  google_drive_configs: defineTable({
+    email: v.string(),
+    accessToken: v.optional(v.string()),
+    refreshToken: v.optional(v.string()),
+    tokenExpiry: v.optional(v.number()), // Unix timestamp when access token expires
+    userEmail: v.optional(v.string()), // Google account email
+    userName: v.optional(v.string()), // Google account display name
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_email", ["email"]),
 });
 
 

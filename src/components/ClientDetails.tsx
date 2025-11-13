@@ -1,12 +1,12 @@
 "use client";
 
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { extractClientInfo } from "@/lib/typeform";
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { useRouter } from "next/navigation";
-import type { Id } from "../../convex/_generated/dataModel";
+import type { Id, Doc } from "../../convex/_generated/dataModel";
 import UnlinkedTranscripts from "./UnlinkedTranscripts";
 import ScriptTabContent from "./ScriptTabContent";
 import { Pencil, X, Plus } from "lucide-react";
@@ -29,6 +29,132 @@ type ClientDetailsProps = {
   email: string;
   responseId: string; // Can be either clientId or onboardingResponseId
 };
+
+type NextScriptEditorProps = {
+  ownerEmail: string;
+  clientId: Id<"clients">;
+  defaultDateIso: string | null;
+  onOverride: (date: Date) => Promise<void>;
+  onSkipNext: () => Promise<void>;
+  onResumeToggle: (checked: boolean) => Promise<void>;
+  countdownTo?: number;
+};
+
+function NextScriptEditor({
+  defaultDateIso,
+  onOverride,
+  onSkipNext,
+  onResumeToggle,
+  countdownTo,
+}: NextScriptEditorProps) {
+  const [inputValue, setInputValue] = React.useState<string>(defaultDateIso ? formatFullDate(defaultDateIso) : "");
+  const [saving, setSaving] = React.useState(false);
+  const [nowMs, setNowMs] = React.useState<number>(Date.now());
+
+  React.useEffect(() => {
+    setInputValue(defaultDateIso ? formatFullDate(defaultDateIso) : "");
+  }, [defaultDateIso]);
+
+  React.useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  function formatCountdown(target?: number): string {
+    if (!target) return "";
+    let diff = Math.max(0, target - nowMs);
+    const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+    diff -= days * 24 * 60 * 60 * 1000;
+    const hours = Math.floor(diff / (60 * 60 * 1000));
+    diff -= hours * 60 * 60 * 1000;
+    const minutes = Math.floor(diff / (60 * 1000));
+    diff -= minutes * 60 * 1000;
+    const seconds = Math.floor(diff / 1000);
+    return `${days}d ${hours}h ${minutes}m ${seconds}s`;
+  }
+
+  const handleSave = async () => {
+    if (!inputValue) return;
+    const parsed = new Date(inputValue);
+    if (isNaN(parsed.getTime())) {
+      alert("Please enter a valid date (e.g., Nov 19, 2025 or 11/19/2025).");
+      return;
+    }
+    setSaving(true);
+    try {
+      await onOverride(parsed);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          placeholder="mm/dd/yyyy"
+          className="flex-1 rounded-md border border-foreground/15 bg-background px-3 py-2 text-sm"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+        />
+        <button
+          className="px-3 py-2 rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 text-sm"
+          title="Pick date"
+        >
+          📅
+        </button>
+      </div>
+      <div className="flex gap-2 mt-2">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex-1 px-3 py-1.5 text-xs rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 font-light"
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+        <button
+          onClick={() => setInputValue(defaultDateIso ? formatFullDate(defaultDateIso) : "")}
+          className="flex-1 px-3 py-1.5 text-xs rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 font-light"
+        >
+          Revert
+        </button>
+      </div>
+      <div className="space-y-2 mt-3">
+        <label className="flex items-center gap-2 text-sm font-light cursor-pointer">
+          <input
+            type="checkbox"
+            className="rounded border-foreground/20"
+            onChange={async (e) => {
+              e.currentTarget.checked = false; // reset UI
+              await onSkipNext();
+            }}
+          />
+          <span>Skip next drop</span>
+        </label>
+        <label className="flex items-center gap-2 text-sm font-light cursor-pointer">
+          <input
+            type="checkbox"
+            defaultChecked
+            className="rounded border-foreground/20"
+            onChange={async (e) => {
+              await onResumeToggle(e.currentTarget.checked);
+            }}
+          />
+          <span>Resume schedule</span>
+        </label>
+      </div>
+      {typeof countdownTo === "number" && (
+        <p className="text-xs text-foreground/50 font-light mt-2" aria-live="polite">
+          Next run in {formatCountdown(countdownTo)}
+        </p>
+      )}
+      <p className="text-xs text-foreground/50 font-light mt-1">
+        Cadence recalculates from Last Script Date unless you override Next.
+      </p>
+    </div>
+  );
+}
 
 function formatShortDate(dateString: string | null): string {
   if (!dateString) return "N/A";
@@ -111,9 +237,24 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
     api.cronJobs.getCronJobsForClient,
     client ? { clientId: client._id } : "skip"
   );
+  // Next scheduled cron job
+  const nextScheduledJob = useQuery(
+    api.cronJobs.getNextScheduledJob,
+    client ? { clientId: client._id } : "skip"
+  );
+  // Actions to control schedule
+  const overrideNextRun = useAction(api.cronJobs.overrideNextRun);
+  const skipNextRun = useAction(api.cronJobs.skipNextRun);
   
   // Get settings (for backwards compatibility, but schedule is now fixed)
   const settings = useQuery(api.scriptSettings.getSettingsForEmail, { email });
+
+  // Countdown to next scheduled execution (must be before any early returns)
+  const [nowMs, setNowMs] = React.useState<number>(Date.now());
+  React.useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Initialize notes from client data
   React.useEffect(() => {
@@ -371,11 +512,27 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
   }
 
   const submittedAt = additionalInfo.submittedAt || new Date(client.createdAt).toISOString();
-  const nextScriptDate = getNextScriptDate(submittedAt);
+  // Derive next script date from backend schedule; fallback to placeholder logic if absent
+  const nextScriptDateIso = nextScheduledJob
+    ? new Date(nextScheduledJob.scheduledTime).toISOString()
+    : getNextScriptDate(submittedAt);
   const lastCallDate = transcripts && transcripts.length > 0 
     ? new Date(transcripts[0].date).toISOString() 
     : submittedAt;
   const memberSinceDate = new Date(client.createdAt).toISOString();
+
+  function formatCountdownTo(targetMs?: number): string {
+    if (!targetMs) return "";
+    let diff = Math.max(0, targetMs - nowMs);
+    const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+    diff -= days * 24 * 60 * 60 * 1000;
+    const hours = Math.floor(diff / (60 * 60 * 1000));
+    diff -= hours * 60 * 60 * 1000;
+    const minutes = Math.floor(diff / (60 * 1000));
+    diff -= minutes * 60 * 1000;
+    const seconds = Math.floor(diff / 1000);
+    return `${days}d ${hours}h ${minutes}m ${seconds}s`;
+  }
 
   return (
     <div className="min-h-screen px-4 py-12 bg-background">
@@ -440,7 +597,9 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
                           {client.status ? client.status.charAt(0).toUpperCase() + client.status.slice(1) : "Inactive"}
                         </span>
                         <span className="text-sm text-foreground/60 font-light">
-                          Next in 18d
+                          {nextScheduledJob
+                            ? `Next in ${formatCountdownTo(nextScheduledJob.scheduledTime)}`
+                            : "No upcoming"}
                         </span>
                       </div>
                     </div>
@@ -691,9 +850,9 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
                           <li>Then monthly on that day</li>
                         </ul>
                       </div>
-                      {cronJobs && cronJobs.length > 0 && cronJobs.some(j => j.isRepeating && j.status === "scheduled") && (
+                      {cronJobs && cronJobs.length > 0 && cronJobs.some((j: Doc<"cron_jobs">) => j.isRepeating && j.status === "scheduled") && (
                         <p className="text-xs text-foreground/50 font-light">
-                          Recurring monthly on day {cronJobs.find(j => j.isRepeating && j.status === "scheduled")?.dayOfMonth}
+                          Recurring monthly on day {cronJobs.find((j: Doc<"cron_jobs">) => j.isRepeating && j.status === "scheduled")?.dayOfMonth}
                         </p>
                       )}
                     </div>
@@ -703,8 +862,8 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
                       <label className="text-xs text-foreground/60 font-light mb-1 block">Scheduled Jobs</label>
                       <div className="space-y-1">
                         {cronJobs
-                          .filter((job) => job.status === "scheduled")
-                          .map((job) => (
+                          .filter((job: Doc<"cron_jobs">) => job.status === "scheduled")
+                          .map((job: Doc<"cron_jobs">) => (
                             <div key={job.cronJobId} className="text-xs text-foreground/70">
                               {new Date(job.scheduledTime).toLocaleDateString()} (day {job.dayOfMonth}{job.isRepeating ? ", monthly" : ""})
                             </div>
@@ -714,39 +873,22 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
                   )}
                   <div>
                     <label className="text-xs text-foreground/60 font-light mb-1 block">Next Script</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="mm/dd/yyyy"
-                        className="flex-1 rounded-md border border-foreground/15 bg-background px-3 py-2 text-sm"
-                        defaultValue={nextScriptDate ? formatFullDate(nextScriptDate) : ""}
-                      />
-                      <button className="px-3 py-2 rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 text-sm">
-                        📅
-                      </button>
-                    </div>
-                    <div className="flex gap-2 mt-2">
-                      <button className="flex-1 px-3 py-1.5 text-xs rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 font-light">
-                        Save
-                      </button>
-                      <button className="flex-1 px-3 py-1.5 text-xs rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 font-light">
-                        Revert
-                      </button>
-                    </div>
+                    <NextScriptEditor
+                      ownerEmail={email}
+                      clientId={client._id}
+                      defaultDateIso={nextScriptDateIso}
+                      onOverride={async (d) => {
+                        await overrideNextRun({ clientId: client._id, ownerEmail: email, nextTime: d.getTime() });
+                      }}
+                      onSkipNext={async () => {
+                        await skipNextRun({ clientId: client._id, ownerEmail: email });
+                      }}
+                      onResumeToggle={async (checked: boolean) => {
+                        await updateClient({ clientId: client._id, cronJobEnabled: checked });
+                      }}
+                      countdownTo={nextScheduledJob?.scheduledTime}
+                    />
                   </div>
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-2 text-sm font-light cursor-pointer">
-                      <input type="checkbox" className="rounded border-foreground/20" />
-                      <span>Skip next drop</span>
-                    </label>
-                    <label className="flex items-center gap-2 text-sm font-light cursor-pointer">
-                      <input type="checkbox" defaultChecked className="rounded border-foreground/20" />
-                      <span>Resume schedule</span>
-                    </label>
-                  </div>
-                  <p className="text-xs text-foreground/50 font-light">
-                    Cadence recalculates from Last Script Date unless you override Next.
-                  </p>
                 </div>
               </CardHeader>
             </Card>
@@ -821,7 +963,7 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-foreground">
-                    {nextScriptDate ? formatShortDate(nextScriptDate) : "N/A"}
+                    {nextScriptDateIso ? formatShortDate(nextScriptDateIso) : "N/A"}
                   </div>
                 </CardContent>
               </Card>
@@ -875,7 +1017,7 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
                 <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
                   <CardHeader>
                     <CardTitle className="text-lg font-bold mb-4">
-                      Next Script Due {nextScriptDate ? formatFullDate(nextScriptDate) : "N/A"}
+                      Next Script Due {nextScriptDateIso ? formatFullDate(nextScriptDateIso) : "N/A"}
                     </CardTitle>
                     <div className="space-y-2">
                       <div className="flex items-center gap-2 text-sm">
@@ -1034,3 +1176,5 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
     </div>
   );
 }
+
+// Removed ManageDriveFoldersButton: Drive folder controls moved to Script editor dialog

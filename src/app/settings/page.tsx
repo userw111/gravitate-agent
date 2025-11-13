@@ -5,6 +5,7 @@ import FirefliesSettingsCard from "@/components/FirefliesSettingsCard";
 import ScriptSettingsCard from "@/components/ScriptSettingsCard";
 import OpenRouterSettingsCard from "@/components/OpenRouterSettingsCard";
 import ScriptGenerationStatusCard from "@/components/ScriptGenerationStatusCard";
+import GoogleDriveSettingsCard from "@/components/GoogleDriveSettingsCard";
 
 export default async function SettingsPage() {
   const user = await getCurrentUser();
@@ -19,6 +20,7 @@ export default async function SettingsPage() {
         <OpenRouterSettingsCard />
         <ScriptGenerationStatusCard />
         <ScriptSettingsCard email={user.email} />
+        <GoogleDriveSettingsCard email={user.email} />
         <TypeformSettingsCard
           email={user.email}
           appUrl={process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}

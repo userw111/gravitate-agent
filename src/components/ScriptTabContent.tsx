@@ -52,13 +52,10 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
   const [scriptContent, setScriptContent] = React.useState<string>(""); // Now stores HTML
   const [selectedModel, setSelectedModel] = React.useState("openai/gpt-5");
   const [thinkingEffort, setThinkingEffort] = React.useState<ThinkingEffort>("medium");
-  const [isPdfPreviewOpen, setIsPdfPreviewOpen] = React.useState(false);
-  const [pdfPreviewUrl, setPdfPreviewUrl] = React.useState<string>("");
   const [zoomLevel, setZoomLevel] = React.useState<number | "auto">("auto");
   const editorContainerRef = React.useRef<HTMLDivElement>(null);
   const isUserEditingRef = React.useRef(false);
   const lastAIContentRef = React.useRef<string>("");
-  const [isExporting, setIsExporting] = React.useState(false);
   const [isCopying, setIsCopying] = React.useState(false);
   const [toolbarVersion, setToolbarVersion] = React.useState(0);
   const [isLinkDialogOpen, setIsLinkDialogOpen] = React.useState(false);
@@ -75,6 +72,57 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
   const isDialogOpenRef = React.useRef(isDialogOpen);
   const [aiFlash, setAiFlash] = React.useState(false);
   const aiStreamTimersRef = React.useRef<number[]>([]);
+  
+  // Currently selected script doc
+  const selectedScript = selectedScriptId && scripts
+    ? scripts.find((s) => s._id === selectedScriptId) || null
+    : null;
+  
+  // Drive folder UI state
+  const [isCreatingFolders, setIsCreatingFolders] = React.useState(false);
+  const [driveMonthLink, setDriveMonthLink] = React.useState<string | null>(null);
+  const [driveError, setDriveError] = React.useState<string | null>(null);
+  const [driveCopied, setDriveCopied] = React.useState(false);
+
+  const ensureDriveFolders = React.useCallback(async () => {
+    if (!clientId) return;
+    setIsCreatingFolders(true);
+    setDriveError(null);
+    try {
+      const dateMs = selectedScript?.createdAt || Date.now();
+      const res = await fetch("/api/google-drive/create-folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, dateMs }),
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string; errorCode?: string };
+        let errorMsg = data.error || "Failed to ensure Drive folders";
+        
+        // Provide helpful instructions for common errors
+        if (data.errorCode === "drive_api_disabled") {
+          errorMsg += " Visit https://console.cloud.google.com/apis/library/drive.googleapis.com to enable the Google Drive API.";
+        } else if (data.errorCode === "drive_auth_failed") {
+          errorMsg += " Go to Settings → Google Drive Integration and reconnect your account.";
+        }
+        
+        throw new Error(errorMsg);
+      }
+      const data = (await res.json()) as { monthFolderLink?: string };
+      setDriveMonthLink(typeof data.monthFolderLink === "string" ? data.monthFolderLink : null);
+    } catch (e) {
+      setDriveError(e instanceof Error ? e.message : "Failed to ensure Drive folders");
+    } finally {
+      setIsCreatingFolders(false);
+    }
+  }, [clientId, selectedScript?.createdAt]);
+
+  const copyDriveLink = React.useCallback(async () => {
+    if (!driveMonthLink) return;
+    await navigator.clipboard.writeText(driveMonthLink);
+    setDriveCopied(true);
+    setTimeout(() => setDriveCopied(false), 1200);
+  }, [driveMonthLink]);
 
   // Utilities to detect changed blocks between HTML versions
   const getBlockTexts = React.useCallback((html: string): string[] => {
@@ -237,17 +285,13 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
     setZoomLevel("auto");
   };
 
-  const selectedScript = selectedScriptId && scripts
-    ? scripts.find((s) => s._id === selectedScriptId) || null
-    : null;
-
   const handleScriptClick = (scriptId: Id<"scripts">) => {
     setSelectedScriptId(scriptId);
     isUserEditingRef.current = false; // Reset flag when selecting new script
     const script = scripts?.find((s) => s._id === scriptId);
     if (script) {
       setScriptContent(script.contentHtml);
-    setIsDialogOpen(true);
+      setIsDialogOpen(true);
     }
   };
 
@@ -306,67 +350,6 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
     setIsLinkDialogOpen(true);
   }, [editor]);
 
-  // Export current script content as a Word (.docx) document (client-side)
-  const handleExportWord = React.useCallback(async () => {
-    try {
-      setIsExporting(true);
-      const html = editorRef.current ? editorRef.current.getHTML() : scriptContent || "";
-      if (!html || html.trim().length === 0) {
-        console.warn("No content to export");
-        setIsExporting(false);
-        return;
-      }
-      // Wrap with minimal HTML/CSS to preserve structure
-      const wrappedHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="UTF-8" />
-            <style>
-              body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                line-height: 1.6;
-                color: #000;
-              }
-              h1 { font-size: 2em; font-weight: 700; }
-              h2 { font-size: 1.5em; font-weight: 600; }
-              h3 { font-size: 1.25em; font-weight: 600; }
-              p { margin: 0 0 1em 0; }
-              ul, ol { margin: 0 0 1em 1.5em; }
-              li { margin-bottom: 0.5em; }
-              blockquote { border-left: 4px solid #ddd; padding-left: 1em; color: #555; }
-              code { font-family: 'Courier New', monospace; font-size: 0.95em; background: #f4f4f4; padding: 2px 4px; }
-              pre { background: #f4f4f4; padding: 1em; overflow-x: auto; }
-              a { color: #1155cc; text-decoration: underline; }
-            </style>
-          </head>
-          <body>
-            ${html}
-          </body>
-        </html>
-      `;
-      // Dynamic import to keep SSR safe
-      const mod = await import("html-docx-js/dist/html-docx");
-      const htmlDocx = mod.default || (mod as any);
-      const blob: Blob = htmlDocx.asBlob(wrappedHtml);
-      const url = URL.createObjectURL(blob);
-      const createdAt =
-        (selectedScript?.createdAt && new Date(selectedScript.createdAt).toISOString().slice(0, 10)) ||
-        new Date().toISOString().slice(0, 10);
-      const filename = `Script-${createdAt}.docx`;
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("Failed to export Word document:", err);
-    } finally {
-      setIsExporting(false);
-    }
-  }, [scriptContent, selectedScript]);
 
   // Copy with formatting (HTML) for Google Docs / Word
   const handleCopyRich = React.useCallback(async () => {
@@ -632,176 +615,14 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
     }
   }, [editor, editorContainerRef, getBlockTexts, scriptContent, cleanupAiStreams]);
 
-  const handleFinalize = React.useCallback(() => {
-    if (!editor) return;
-    
-    // Get HTML directly from TipTap editor
-    const editorHtml = editor.getHTML();
-    
-    // Generate PDF preview HTML with page structure
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <style>
-            * {
-              box-sizing: border-box;
-            }
-            @page {
-              size: letter;
-              margin: 1in;
-            }
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-              line-height: 1.6;
-              color: #333;
-              background: #f5f5f5;
-              padding: 20px;
-              margin: 0;
-            }
-            .page {
-              width: 8.5in;
-              min-height: 11in;
-              padding: 1in;
-              margin: 0 auto 0.5in;
-              background: white;
-              box-shadow: 0 0 10px rgba(0,0,0,0.1);
-              page-break-after: always;
-              overflow-y: auto;
-            }
-            .page:last-child {
-              page-break-after: auto;
-              margin-bottom: 0;
-            }
-            h1 { 
-              font-size: 2em; 
-              margin-top: 0; 
-              margin-bottom: 0.5em; 
-              font-weight: 700;
-              line-height: 1.2;
-              page-break-after: avoid;
-            }
-            h2 { 
-              font-size: 1.5em; 
-              margin-top: 1.5em; 
-              margin-bottom: 0.5em; 
-              font-weight: 600;
-              line-height: 1.3;
-              page-break-after: avoid;
-            }
-            h3 { 
-              font-size: 1.25em; 
-              margin-top: 1em; 
-              margin-bottom: 0.5em; 
-              font-weight: 600;
-              line-height: 1.4;
-              page-break-after: avoid;
-            }
-            p { 
-              margin-bottom: 1em; 
-              line-height: 1.6;
-              orphans: 3;
-              widows: 3;
-            }
-            ul, ol { 
-              margin-bottom: 1em; 
-              padding-left: 2em; 
-              page-break-inside: avoid;
-            }
-            li { 
-              margin-bottom: 0.5em; 
-              line-height: 1.6;
-            }
-            code { 
-              background: #f4f4f4; 
-              padding: 2px 6px; 
-              border-radius: 3px; 
-              font-family: 'Courier New', monospace;
-              font-size: 0.9em;
-            }
-            pre { 
-              background: #f4f4f4; 
-              padding: 1em; 
-              border-radius: 5px; 
-              overflow-x: auto;
-              margin-bottom: 1em;
-              page-break-inside: avoid;
-            }
-            pre code {
-              background: transparent;
-              padding: 0;
-            }
-            blockquote { 
-              border-left: 4px solid #ddd; 
-              padding-left: 1em; 
-              margin-left: 0; 
-              margin-bottom: 1em;
-              color: #666; 
-              font-style: italic;
-              page-break-inside: avoid;
-            }
-            a { 
-              color: #0066cc; 
-              text-decoration: none; 
-            }
-            a:hover { 
-              text-decoration: underline; 
-            }
-            strong {
-              font-weight: 600;
-            }
-            em {
-              font-style: italic;
-            }
-            hr {
-              border: none;
-              border-top: 1px solid #ddd;
-              margin: 2em 0;
-              page-break-after: avoid;
-            }
-            @media print {
-              body {
-                background: white;
-                padding: 0;
-              }
-              .page {
-                box-shadow: none;
-                margin: 0;
-                page-break-after: always;
-              }
-              .page:last-child {
-                page-break-after: auto;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="page">
-            ${editorHtml}
-          </div>
-        </body>
-      </html>
-    `;
-    
-    // Create blob URL for preview
-    const blob = new Blob([htmlContent], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    setPdfPreviewUrl(url);
-    setIsPdfPreviewOpen(true);
-  }, [editor]);
-
-  // Cleanup blob URL on unmount
+  // Cleanup timeout on unmount
   React.useEffect(() => {
     return () => {
-      if (pdfPreviewUrl) {
-        URL.revokeObjectURL(pdfPreviewUrl);
-      }
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [pdfPreviewUrl]);
+  }, []);
 
   // Initialize saved time when dialog opens with existing script
   React.useEffect(() => {
@@ -1312,9 +1133,9 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
                   </div>
                 </div>
                 
-                {/* Footer with Finalize button */}
+                {/* Footer */}
                 <div className="border-t border-foreground/10 px-6 py-4 bg-background">
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap items-center">
                     <Button
                       variant="outline"
                       disabled={isCopying || !editor}
@@ -1323,20 +1144,38 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
                     >
                       {isCopying ? "Copying..." : "Copy Rich Text"}
                     </Button>
-                    <Button
-                      variant="outline"
-                      disabled={isExporting || !editor}
-                      onClick={handleExportWord}
-                      className="cursor-pointer hover:bg-accent hover:text-accent-foreground transition-all duration-200"
-                    >
-                      {isExporting ? "Exporting..." : "Export Word (.docx)"}
-                    </Button>
-                    <Button
-                      onClick={handleFinalize}
-                      className="flex-1 cursor-pointer hover:bg-primary/90 hover:shadow-lg hover:-translate-y-0.5 hover:scale-[1.02] transition-all duration-200 active:translate-y-0 active:scale-100"
-                    >
-                      Finalize
-                    </Button>
+                    {/* Drive folders */}
+                    {!driveMonthLink ? (
+                      <Button
+                        variant="outline"
+                        disabled={isCreatingFolders || !selectedScript}
+                        onClick={ensureDriveFolders}
+                        className="cursor-pointer"
+                      >
+                        {isCreatingFolders ? "Creating Folders..." : "Create Folders"}
+                      </Button>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={driveMonthLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-2 text-sm rounded-md border border-foreground/15 hover:bg-foreground/5 transition-all duration-150 font-light"
+                        >
+                          Open Folders
+                        </a>
+                        <Button
+                          variant="outline"
+                          onClick={copyDriveLink}
+                          className="cursor-pointer"
+                        >
+                          {driveCopied ? "Copied" : "Copy Link"}
+                        </Button>
+                      </div>
+                    )}
+                    {driveError && (
+                      <span className="text-xs text-red-500">{driveError}</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1432,34 +1271,6 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
         </DialogContent>
       </Dialog>
 
-      {/* PDF Preview Dialog */}
-      <Dialog 
-        open={isPdfPreviewOpen} 
-        onOpenChange={(open) => {
-          setIsPdfPreviewOpen(open);
-          if (!open && pdfPreviewUrl) {
-            // Cleanup blob URL when dialog closes
-            URL.revokeObjectURL(pdfPreviewUrl);
-            setPdfPreviewUrl("");
-          }
-        }}
-      >
-        <DialogContent className="max-w-[90vw] w-[90vw] max-h-[90vh] h-[90vh] flex flex-col p-0 gap-0 sm:max-w-[90vw]">
-          <DialogHeader className="px-6 py-4 border-b">
-            <DialogTitle>PDF Preview</DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto overflow-x-hidden bg-gray-100 p-4">
-            {pdfPreviewUrl && (
-              <iframe
-                src={pdfPreviewUrl}
-                className="w-full border-0 bg-transparent"
-                style={{ minHeight: '100%' }}
-                title="PDF Preview"
-              />
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
