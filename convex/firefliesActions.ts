@@ -232,6 +232,9 @@ type FirefliesTranscript = {
     speaker_id?: string;
   }>;
   participants?: string[]; // Array of strings, not objects
+  summary?: {
+    notes?: string; // AI-generated notes from the call
+  };
 };
 
 type FirefliesTranscriptsResponse = {
@@ -256,6 +259,7 @@ export const fetchFirefliesTranscripts = action({
     transcript: string;
     participants?: string[];
     sentences?: Array<{ text: string; speakerName?: string; speakerId?: string }>;
+    notes?: string;
   }>> => {
     const config: { apiKey?: string } | null = await ctx.runQuery(api.fireflies.getConfigForEmail, {
       email: args.email,
@@ -281,6 +285,9 @@ export const fetchFirefliesTranscripts = action({
             speaker_name
           }
           participants
+          summary {
+            notes
+          }
         }
       }
     `;
@@ -349,6 +356,7 @@ export const fetchFirefliesTranscripts = action({
         transcript: fullTranscript,
         participants,
         sentences: normalizedSentences,
+        notes: transcript.summary?.notes,
       };
     });
   },
@@ -370,6 +378,7 @@ export const fetchTranscriptById = action({
     transcript: string;
     participants?: string[];
     sentences?: Array<{ text: string; speakerName?: string; speakerId?: string }>;
+    notes?: string;
   } | null> => {
     const config: { apiKey?: string } | null = await ctx.runQuery(api.fireflies.getConfigForEmail, {
       email: args.email,
@@ -394,6 +403,9 @@ export const fetchTranscriptById = action({
             speaker_name
           }
           participants
+          summary {
+            notes
+          }
         }
       }
     `;
@@ -465,6 +477,7 @@ export const fetchTranscriptById = action({
       transcript: fullTranscript,
       participants,
       sentences: normalizedSentences,
+      notes: transcript.summary?.notes,
     };
   },
 });
@@ -485,6 +498,7 @@ export const syncFirefliesTranscripts = action({
       transcript: string;
       participants?: string[];
       sentences?: Array<{ text: string; speakerName?: string; speakerId?: string }>;
+      notes?: string;
     }> = await ctx.runAction(api.firefliesActions.fetchFirefliesTranscripts, {
       email: args.email,
     });
@@ -527,6 +541,7 @@ export const syncFirefliesTranscripts = action({
           date: dateTimestamp,
           duration: transcript.duration,
           participants: transcript.participants,
+          notes: transcript.notes,
           clientId: match ? match.meta.client._id : undefined,
           linkingStatus,
           lastLinkAttemptAt: attemptTimestamp,
@@ -611,6 +626,7 @@ export const fetchAndStoreTranscriptById = action({
         date: dateTimestamp,
         duration: transcript.duration,
         participants: transcript.participants,
+        notes: transcript.notes,
         clientId: match ? match.meta.client._id : undefined,
         linkingStatus,
         lastLinkAttemptAt: attemptTimestamp,
@@ -677,14 +693,17 @@ export const analyzeTranscriptForLinking = action({
       };
     }
 
-    // Note: OPENROUTER_API_KEY must be set in Convex dashboard environment variables
-    // Go to: Convex Dashboard → Settings → Environment Variables
-    // This uses the same API key as the AI chat feature
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    // Get OpenRouter API key from Convex (user-specific)
+    const openrouterConfig = await ctx.runQuery(api.openrouter.getConfigForEmail, {
+      email: args.email,
+    });
+
+    // Fallback to environment variable for backwards compatibility
+    const apiKey = openrouterConfig?.apiKey || process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
       throw new Error(
-        "OPENROUTER_API_KEY is not configured. Please set it in Convex Dashboard → Settings → Environment Variables. " +
-        "This should be the same API key used for the AI chat feature."
+        "OpenRouter API key is not configured. Please set it in Settings → OpenRouter. " +
+        "This API key is used for AI-powered transcript linking."
       );
     }
 

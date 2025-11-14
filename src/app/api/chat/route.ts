@@ -1,4 +1,9 @@
 import { getCurrentUser } from "@/lib/auth";
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "../../../../convex/_generated/api";
+
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+const convex = convexUrl ? new ConvexHttpClient(convexUrl) : null;
 
 // System prompt that explains available tools
 const SYSTEM_PROMPT = `You are a helpful AI assistant for Gravitate Agent, a client management platform. You help users manage their clients, view transcripts, and access business information.
@@ -179,12 +184,30 @@ export async function POST(request: Request) {
       });
     }
 
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: "Missing OPENROUTER_API_KEY" }), {
+    // Get OpenRouter API key from Convex (user-specific)
+    if (!convex) {
+      return new Response(JSON.stringify({ error: "Convex not configured" }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    const openrouterConfig = await convex.query(api.openrouter.getConfigForEmail, {
+      email: user.email,
+    });
+
+    // Fallback to environment variable for backwards compatibility
+    const apiKey = openrouterConfig?.apiKey || process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      return new Response(
+        JSON.stringify({
+          error: "OpenRouter API key not configured. Please set it in Settings.",
+        }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
     }
 
     const referer =

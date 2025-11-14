@@ -3,6 +3,7 @@
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import ClientTile from "./ClientTile";
+import ClientsTable from "./ClientsTable";
 import { SegmentedControl } from "./ui/segmented-control";
 import * as React from "react";
 
@@ -12,8 +13,11 @@ type DashboardClientProps = {
 
 type ClientStatus = "all" | "active" | "paused" | "inactive";
 
+type ViewMode = "grid" | "table";
+
 export default function DashboardClient({ email }: DashboardClientProps) {
   const [filter, setFilter] = React.useState<ClientStatus>("all");
+  const [viewMode, setViewMode] = React.useState<ViewMode>("grid");
   const [searchQuery, setSearchQuery] = React.useState("");
   const clients = useQuery(api.clients.getAllClientsForOwner, { ownerEmail: email });
 
@@ -124,6 +128,14 @@ export default function DashboardClient({ email }: DashboardClientProps) {
           </div>
           <SegmentedControl
             options={[
+              { value: "grid", label: "Cards" },
+              { value: "table", label: "Table" },
+            ]}
+            value={viewMode}
+            onChange={(value) => setViewMode(value as ViewMode)}
+          />
+          <SegmentedControl
+            options={[
               { value: "all", label: "All" },
               { value: "active", label: "Active" },
               { value: "paused", label: "Paused" },
@@ -134,7 +146,9 @@ export default function DashboardClient({ email }: DashboardClientProps) {
           />
         </div>
       </div>
-      {filteredClients.length === 0 ? (
+      {viewMode === "table" ? (
+        <ClientsTable email={email} />
+      ) : filteredClients.length === 0 ? (
         <div className="text-center py-12">
           <p className="text-sm text-foreground/60 font-light">
             No {filter === "all" ? "" : filter} clients found.

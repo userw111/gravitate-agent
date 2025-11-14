@@ -1,6 +1,7 @@
 import { mutation, query, QueryCtx, MutationCtx, action, ActionCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { api } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 
 /**
  * Get all clients for an owner
@@ -193,6 +194,60 @@ export const getClientsForLinking = query({
 });
 
 /**
+ * Get clients with schedule and activity summary for dashboard table view
+ */
+export const getClientsWithScheduleSummary = query({
+  args: { ownerEmail: v.string() },
+  handler: async (ctx: QueryCtx, args) => {
+    const clients = await ctx.db
+      .query("clients")
+      .withIndex("by_owner", (q) => q.eq("ownerEmail", args.ownerEmail))
+      .collect();
+
+    // For each client, fetch last script, last call, and next scheduled job
+    const summaries = await Promise.all(
+      clients.map(async (client) => {
+        const clientId = client._id as Id<"clients">;
+
+        // Last script for client
+        const scripts = await ctx.db
+          .query("scripts")
+          .withIndex("by_client", (q) => q.eq("clientId", clientId))
+          .order("desc")
+          .take(1);
+        const lastScript = scripts[0] ?? null;
+
+        // Last call transcript for client
+        const transcripts = await ctx.db
+          .query("fireflies_transcripts")
+          .withIndex("by_client", (q) => q.eq("clientId", clientId))
+          .order("desc")
+          .take(1);
+        const lastTranscript = transcripts[0] ?? null;
+
+        // Next scheduled cron job for client
+        const nextJob = await ctx.db
+          .query("cron_jobs")
+          .withIndex("by_client", (q) => q.eq("clientId", clientId))
+          .filter((q) => q.eq(q.field("status"), "scheduled"))
+          .order("asc")
+          .take(1);
+        const nextScheduled = nextJob[0] ?? null;
+
+        return {
+          ...client,
+          lastScriptDate: lastScript ? lastScript.createdAt : null,
+          lastCallDate: lastTranscript ? lastTranscript.date : null,
+          nextScriptDate: nextScheduled ? nextScheduled.scheduledTime : null,
+        };
+      })
+    );
+
+    return summaries;
+  },
+});
+
+/**
  * Link a transcript to a client
  */
 export const linkTranscriptToClient = mutation({
@@ -367,6 +422,7 @@ export const updateClient = mutation({
     contactFirstName: v.optional(v.string()),
     contactLastName: v.optional(v.string()),
     targetRevenue: v.optional(v.number()),
+    servicesOffered: v.optional(v.string()),
     status: v.optional(v.union(
       v.literal("active"),
       v.literal("paused"),
@@ -396,6 +452,7 @@ export const updateClient = mutation({
       contactFirstName?: string;
       contactLastName?: string;
       targetRevenue?: number;
+      servicesOffered?: string;
       status?: "active" | "paused" | "inactive";
       notes?: string;
       cronJobSchedule?: number[];
@@ -429,6 +486,9 @@ export const updateClient = mutation({
     }
     if (args.targetRevenue !== undefined) {
       updateData.targetRevenue = args.targetRevenue || undefined;
+    }
+    if (args.servicesOffered !== undefined) {
+      updateData.servicesOffered = args.servicesOffered || undefined;
     }
     if (args.status !== undefined) {
       updateData.status = args.status;

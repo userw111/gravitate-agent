@@ -61,6 +61,8 @@ export default function UnlinkedTranscripts({ email, clientId, showEditButton = 
     transcript: string;
     date: number;
     participants?: string[];
+    sentences?: Array<{ text: string; speakerName?: string; speakerId?: string }>;
+    mode: "view" | "edit";
   } | null>(null);
   const [dialogSearchQuery, setDialogSearchQuery] = React.useState("");
   const [dialogSelectedClientId, setDialogSelectedClientId] = React.useState<string>("");
@@ -401,13 +403,15 @@ export default function UnlinkedTranscripts({ email, clientId, showEditButton = 
     }
   };
 
-  const handleOpenDialog = (transcript: Transcript) => {
+  const handleOpenDialog = (transcript: Transcript, mode: "view" | "edit" = "view") => {
     setSelectedTranscript({
       transcriptId: transcript.transcriptId,
       title: transcript.title,
       transcript: transcript.transcript,
       date: transcript.date,
       participants: transcript.participants,
+      sentences: transcript.sentences,
+      mode,
     });
     // Pre-select client if editing a linked transcript
     if (clientId && transcript.clientId === clientId) {
@@ -473,7 +477,7 @@ export default function UnlinkedTranscripts({ email, clientId, showEditButton = 
                     variant="outline"
                     size="sm"
                     className="text-xs cursor-pointer hover:bg-accent hover:text-accent-foreground hover:border-accent-foreground/20 hover:shadow-md hover:-translate-y-0.5 hover:scale-[1.02] transition-all duration-200 active:translate-y-0 active:scale-100"
-                    onClick={() => handleOpenDialog(transcript)}
+                    onClick={() => handleOpenDialog(transcript, "view")}
                   >
                     <Maximize2 className="h-3 w-3 mr-1 transition-transform duration-200 group-hover:scale-110" />
                     View Full Transcript
@@ -491,7 +495,7 @@ export default function UnlinkedTranscripts({ email, clientId, showEditButton = 
                         if (clientId) {
                           setDialogSelectedClientId(clientId);
                         }
-                        handleOpenDialog(transcript);
+                        handleOpenDialog(transcript, "edit");
                       }}
                     >
                       <Pencil className="h-3 w-3 mr-1 transition-transform duration-200 group-hover:scale-110" />
@@ -628,6 +632,7 @@ export default function UnlinkedTranscripts({ email, clientId, showEditButton = 
                 <DialogTitle className="px-6 pt-6 text-base">
                   {selectedTranscript.title}
                 </DialogTitle>
+                {selectedTranscript.mode === "view" && (
                 <DialogDescription asChild>
                   <div className="p-6">
                     <div className="space-y-4 [&_strong]:font-semibold [&_strong]:text-foreground">
@@ -640,15 +645,48 @@ export default function UnlinkedTranscripts({ email, clientId, showEditButton = 
                         </p>
                       </div>
                       <div className="space-y-2">
+                          {selectedTranscript.sentences && selectedTranscript.sentences.length > 0 ? (
+                            <div className="space-y-3">
+                              {selectedTranscript.sentences.map((sentence, index) => (
+                                <div key={index} className="space-y-1">
+                                  {sentence.speakerName && (
+                                    <p className="text-xs font-semibold text-foreground/70">
+                                      {sentence.speakerName}
+                                    </p>
+                                  )}
+                                  <p className="text-sm text-foreground/90 whitespace-pre-wrap">
+                                    {sentence.text}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
                         <p className="text-sm text-foreground/90 whitespace-pre-wrap">
                           {selectedTranscript.transcript}
                         </p>
+                          )}
+                        </div>
                       </div>
+                    </div>
+                  </DialogDescription>
+                )}
+                {selectedTranscript.mode === "edit" && (
+                  <DialogDescription asChild>
+                    <div className="p-6">
+                      <div className="space-y-2">
+                        <p className="text-xs text-foreground/60">
+                          {formatDate(selectedTranscript.date)}
+                          {selectedTranscript.participants && selectedTranscript.participants.length > 0 && (
+                            <> • {selectedTranscript.participants.join(", ")}</>
+                          )}
+                        </p>
                     </div>
                   </div>
                 </DialogDescription>
+                )}
               </DialogHeader>
             </div>
+            {selectedTranscript.mode === "edit" && (
             <DialogFooter className="border-t px-6 py-4">
               <div className="w-full space-y-2 mb-3">
                 <Input
@@ -734,6 +772,7 @@ export default function UnlinkedTranscripts({ email, clientId, showEditButton = 
                 {linking === selectedTranscript.transcriptId ? "Linking..." : "Link"}
               </Button>
             </DialogFooter>
+            )}
           </DialogContent>
         </Dialog>
       )}

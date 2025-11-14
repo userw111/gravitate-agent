@@ -79,6 +79,7 @@ export default defineSchema({
     
     // Business metadata
     targetRevenue: v.optional(v.number()),
+    servicesOffered: v.optional(v.string()), // Services/products offered by the client's business
     status: v.optional(v.union(
       v.literal("active"),
       v.literal("paused"),
@@ -120,6 +121,7 @@ export default defineSchema({
     date: v.number(),
     duration: v.optional(v.number()),
     participants: v.optional(v.array(v.string())),
+    notes: v.optional(v.string()), // AI-generated notes from Fireflies
     syncedAt: v.number(),
     // Link to client
     clientId: v.optional(v.id("clients")),
@@ -241,6 +243,18 @@ export default defineSchema({
     tokenExpiry: v.optional(v.number()), // Unix timestamp when access token expires
     userEmail: v.optional(v.string()), // Google account email
     userName: v.optional(v.string()), // Google account display name
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_email", ["email"]),
+  openrouter_configs: defineTable({
+    email: v.string(),
+    apiKey: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_email", ["email"]),
+  system_prompts: defineTable({
+    email: v.string(),
+    prompt: v.string(), // The system prompt for script generation
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_email", ["email"]),

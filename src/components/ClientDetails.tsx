@@ -327,7 +327,7 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
     };
   }, []);
 
-  // Form state
+  // Form state for edit dialog
   const [formData, setFormData] = React.useState({
     businessName: "",
     businessEmail: "",
@@ -335,9 +335,45 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
     contactFirstName: "",
     contactLastName: "",
     targetRevenue: "",
+    servicesOffered: "",
     status: "active" as "active" | "paused" | "inactive",
   });
   const [newEmail, setNewEmail] = React.useState("");
+
+  // Form state for Edit tab
+  const [editTabFormData, setEditTabFormData] = React.useState({
+    businessName: "",
+    businessEmail: "",
+    businessEmails: [] as string[],
+    contactFirstName: "",
+    contactLastName: "",
+    targetRevenue: "",
+    servicesOffered: "",
+    status: "active" as "active" | "paused" | "inactive",
+  });
+  const [editTabNewEmail, setEditTabNewEmail] = React.useState("");
+  const [isSavingEditTab, setIsSavingEditTab] = React.useState(false);
+
+  // Initialize Edit tab form data when client loads
+  React.useEffect(() => {
+    if (client) {
+      const emails = [...(client.businessEmails || [])];
+      if (client.businessEmail && !emails.includes(client.businessEmail.toLowerCase().trim())) {
+        emails.unshift(client.businessEmail.toLowerCase().trim());
+      }
+      
+      setEditTabFormData({
+        businessName: client.businessName || "",
+        businessEmail: client.businessEmail || "",
+        businessEmails: emails,
+        contactFirstName: client.contactFirstName || "",
+        contactLastName: client.contactLastName || "",
+        targetRevenue: client.targetRevenue?.toString() || "",
+        servicesOffered: client.servicesOffered || "",
+        status: client.status || "active",
+      });
+    }
+  }, [client]);
 
   // Initialize form data when client loads or dialog opens
   React.useEffect(() => {
@@ -365,6 +401,7 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
         contactFirstName: client.contactFirstName || "",
         contactLastName: client.contactLastName || "",
         targetRevenue: client.targetRevenue?.toString() || "",
+        servicesOffered: client.servicesOffered || "",
         status: client.status || "active",
       };
       
@@ -451,6 +488,7 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
         contactFirstName: formData.contactFirstName || undefined,
         contactLastName: formData.contactLastName || undefined,
         targetRevenue: formData.targetRevenue ? parseFloat(formData.targetRevenue) : undefined,
+        servicesOffered: formData.servicesOffered || undefined,
         status: formData.status,
       };
       
@@ -465,6 +503,62 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
       console.error("[ClientDetails] Failed to update client:", error);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Edit tab handlers
+  const handleEditTabAddEmail = () => {
+    const trimmedEmail = editTabNewEmail.trim().toLowerCase();
+    if (trimmedEmail && !editTabFormData.businessEmails.includes(trimmedEmail)) {
+      setEditTabFormData({
+        ...editTabFormData,
+        businessEmails: [...editTabFormData.businessEmails, trimmedEmail],
+      });
+      setEditTabNewEmail("");
+    }
+  };
+
+  const handleEditTabRemoveEmail = (emailToRemove: string) => {
+    setEditTabFormData({
+      ...editTabFormData,
+      businessEmails: editTabFormData.businessEmails.filter(email => email !== emailToRemove),
+    });
+  };
+
+  const handleEditTabSave = async () => {
+    if (!client) return;
+    
+    setIsSavingEditTab(true);
+    try {
+      let emailsToSave = [...editTabFormData.businessEmails];
+      const trimmedNewEmail = editTabNewEmail.trim().toLowerCase();
+      if (trimmedNewEmail && !emailsToSave.includes(trimmedNewEmail)) {
+        emailsToSave.push(trimmedNewEmail);
+      }
+      
+      const normalizedEmails = emailsToSave
+        .map(email => email.toLowerCase().trim())
+        .filter(Boolean);
+      
+      const updatePayload = {
+        clientId: client._id,
+        businessName: editTabFormData.businessName || undefined,
+        businessEmail: normalizedEmails.length > 0 ? normalizedEmails[0] : undefined,
+        businessEmails: normalizedEmails,
+        contactFirstName: editTabFormData.contactFirstName || undefined,
+        contactLastName: editTabFormData.contactLastName || undefined,
+        targetRevenue: editTabFormData.targetRevenue ? parseFloat(editTabFormData.targetRevenue) : undefined,
+        servicesOffered: editTabFormData.servicesOffered || undefined,
+        status: editTabFormData.status,
+      };
+      
+      await updateClient(updatePayload);
+      setEditTabNewEmail("");
+    } catch (error) {
+      console.error("[ClientDetails] Failed to update client:", error);
+      alert("Failed to save changes. Please try again.");
+    } finally {
+      setIsSavingEditTab(false);
     }
   };
 
@@ -520,6 +614,13 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
     ? new Date(transcripts[0].date).toISOString() 
     : submittedAt;
   const memberSinceDate = new Date(client.createdAt).toISOString();
+  const transcriptsCount = transcripts?.length ?? 0;
+  const callNotesCount = transcripts
+    ? transcripts.filter((t) => t.notes && t.notes.trim().length > 0).length
+    : 0;
+  const hasTypeform = !!typeformResponse;
+  const hasTranscripts = transcriptsCount > 0;
+  const hasCallNotes = callNotesCount > 0;
 
   function formatCountdownTo(targetMs?: number): string {
     if (!targetMs) return "";
@@ -560,17 +661,6 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
             </svg>
             Back to Dashboard
           </button>
-          <div className="flex gap-2 mb-8">
-            <button className="px-4 py-2 text-sm rounded-md bg-blue-500 text-white hover:bg-blue-600 transition-all duration-150 font-medium">
-              Generate Scripts Now
-            </button>
-            <button className="px-4 py-2 text-sm rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 transition-all duration-150 font-light">
-              Recalculate Dates
-            </button>
-            <button className="px-4 py-2 text-sm rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 transition-all duration-150 font-light">
-              Open Drive Folder
-            </button>
-          </div>
         </div>
 
         {/* Two Column Layout */}
@@ -794,15 +884,6 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
                       </div>
                     )}
                   </div>
-                  
-                  <div className="flex flex-wrap gap-2 pt-2 border-t border-foreground/10">
-                    <span className="px-2 py-1 rounded text-xs font-medium bg-foreground/10 text-foreground/70">
-                      SaaS
-                    </span>
-                    <span className="px-2 py-1 rounded text-xs font-medium bg-foreground/10 text-foreground/70">
-                      B2B
-                    </span>
-                  </div>
                 </div>
               </CardHeader>
             </Card>
@@ -933,13 +1014,6 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
                 </div>
               </CardHeader>
             </Card>
-
-            {/* Links & Assets Card */}
-            <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">Links & Assets</CardTitle>
-              </CardHeader>
-            </Card>
           </div>
 
           {/* Right Column - Overview and Tabs */}
@@ -995,7 +1069,7 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
 
             {/* Tabs */}
             <div className="flex gap-1 border-b border-foreground/10">
-              {["Overview", "Scripts", "Notes", "Call Intelligence", "Transcripts", "History & Logs"].map((tab) => (
+              {["Overview", "Edit", "Scripts", "Notes", "Call Intelligence", "Transcripts"].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab.toLowerCase().replace(" & ", "-").replace(" ", "-"))}
@@ -1013,80 +1087,117 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
             {/* Tab Content */}
             {activeTab === "overview" && (
               <div className="space-y-4">
-                {/* Readiness Card */}
                 <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
                   <CardHeader>
                     <CardTitle className="text-lg font-bold mb-4">
-                      Next Script Due {nextScriptDateIso ? formatFullDate(nextScriptDateIso) : "N/A"}
+                      Client Overview
                     </CardTitle>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-sm">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-green-500">
-                          <path d="M13 4L6 11L3 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                        <span className="font-light">Typeform</span>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    {/* Top row: key dates */}
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-foreground/60 uppercase tracking-wide">
+                          Next Script Due
+                        </p>
+                        <p className="text-sm font-medium text-foreground">
+                          {nextScriptDateIso ? formatFullDate(nextScriptDateIso) : "Not scheduled"}
+                        </p>
                       </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-green-500">
-                          <path d="M13 4L6 11L3 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                        <span className="font-light">Call notes (Oct 28)</span>
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-foreground/60 uppercase tracking-wide">
+                          Last Call
+                        </p>
+                        <p className="text-sm font-medium text-foreground">
+                          {lastCallDate ? formatFullDate(lastCallDate) : "N/A"}
+                        </p>
                       </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-green-500">
-                          <path d="M13 4L6 11L3 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                        <span className="font-light">Winning angle (CTR 2.8%)</span>
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-foreground/60 uppercase tracking-wide">
+                          Member Since
+                        </p>
+                        <p className="text-sm font-medium text-foreground">
+                          {memberSinceDate ? formatMonthYear(memberSinceDate) : "N/A"}
+                        </p>
                       </div>
                     </div>
-                    <CardContent className="pt-4">
-                      <div className="flex gap-2">
-                        <button className="px-4 py-2 text-sm rounded-md bg-blue-500 text-white hover:bg-blue-600 transition-all duration-150 font-medium">
-                          Generate Scripts Now
-                        </button>
-                        <button className="px-4 py-2 text-sm rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 transition-all duration-150 font-light">
-                          Preview inputs
-                        </button>
-                      </div>
-                    </CardContent>
-                  </CardHeader>
-                </Card>
 
-                {/* Angles & Strategy Card */}
-                <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
-                  <CardHeader>
-                    <CardTitle className="text-sm font-medium mb-4">Angles & Strategy</CardTitle>
-                    <div className="flex flex-wrap gap-2 mb-4">
-                      <button className="px-3 py-1.5 text-sm rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 font-light">
-                        New service
-                      </button>
-                      <button className="px-3 py-1.5 text-sm rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 font-light">
-                        Social proof
-                      </button>
-                      <button className="px-3 py-1.5 text-sm rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 font-light">
-                        Objection handling
-                      </button>
+                    {/* Middle row: metrics */}
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="rounded-lg border border-foreground/10 bg-background/50 px-3 py-2.5">
+                        <p className="text-xs font-medium text-foreground/60 uppercase tracking-wide">
+                          Scripts Generated
+                        </p>
+                        <p className="mt-1 text-xl font-semibold text-foreground">
+                          {totalScriptsGenerated}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-foreground/10 bg-background/50 px-3 py-2.5">
+                        <p className="text-xs font-medium text-foreground/60 uppercase tracking-wide">
+                          Transcripts
+                        </p>
+                        <p className="mt-1 text-xl font-semibold text-foreground">
+                          {transcriptsCount}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-foreground/10 bg-background/50 px-3 py-2.5">
+                        <p className="text-xs font-medium text-foreground/60 uppercase tracking-wide">
+                          Calls with Notes
+                        </p>
+                        <p className="mt-1 text-xl font-semibold text-foreground">
+                          {callNotesCount}
+                        </p>
+                      </div>
                     </div>
-                    <textarea
-                      placeholder="Angle notes for next drop..."
-                      className="w-full min-h-[120px] rounded-md border border-foreground/15 bg-background px-3 py-2 text-sm font-light resize-none"
-                    />
-                  </CardHeader>
-                </Card>
 
-                {/* Recent Activity Card */}
-                <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
-                  <CardHeader>
-                    <CardTitle className="text-sm font-medium mb-4">Recent Activity</CardTitle>
-                    <div className="space-y-2 text-sm">
-                      <div className="text-foreground/70 font-light">
-                        Cadence set to +25d/4w by {email.split("@")[0]} • Today 9:14a
-                      </div>
-                      <div className="text-red-600 dark:text-red-400 font-light">
-                        Error: Drive quota limit • View log
+                    {/* Data sources / readiness */}
+                    <div className="rounded-lg border border-foreground/10 bg-background/60 px-3 py-3">
+                      <p className="text-xs font-medium text-foreground/60 uppercase tracking-wide mb-2">
+                        Data Readiness
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <div className="flex items-center gap-2 text-sm">
+                          <span
+                            className={`h-2.5 w-2.5 rounded-full ${
+                              hasTypeform ? "bg-green-500" : "bg-foreground/30"
+                            }`}
+                          />
+                          <span className="font-light">
+                            Onboarding form{" "}
+                            <span className="font-medium">
+                              {hasTypeform ? "connected" : "missing"}
+                            </span>
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <span
+                            className={`h-2.5 w-2.5 rounded-full ${
+                              hasTranscripts ? "bg-green-500" : "bg-foreground/30"
+                            }`}
+                          />
+                          <span className="font-light">
+                            Transcripts{" "}
+                            <span className="font-medium">
+                              {hasTranscripts ? "available" : "not synced"}
+                            </span>
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <span
+                            className={`h-2.5 w-2.5 rounded-full ${
+                              hasCallNotes ? "bg-green-500" : "bg-foreground/30"
+                            }`}
+                          />
+                          <span className="font-light">
+                            Call notes{" "}
+                            <span className="font-medium">
+                              {hasCallNotes ? "available" : "not added"}
+                            </span>
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </CardHeader>
+                  </CardContent>
                 </Card>
               </div>
             )}
@@ -1135,6 +1246,203 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
               </Card>
             )}
 
+            {/* Edit Tab */}
+            {activeTab === "edit" && (
+              <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
+                <CardHeader>
+                  <CardTitle className="text-lg font-medium">Edit Client Information</CardTitle>
+                  <p className="text-sm text-foreground/60 font-light">
+                    Update all client data. Changes will be used in script generation.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleEditTabSave();
+                    }}
+                    className="space-y-6"
+                  >
+                    {/* Business Information */}
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-medium text-foreground/80">Business Information</h3>
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-business-name">Business Name *</Label>
+                        <Input
+                          id="edit-business-name"
+                          value={editTabFormData.businessName}
+                          onChange={(e) =>
+                            setEditTabFormData({ ...editTabFormData, businessName: e.target.value })
+                          }
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Business Emails</Label>
+                        <div className="space-y-2">
+                          {editTabFormData.businessEmails.map((email, index) => (
+                            <div key={index} className="flex items-center gap-2">
+                              <Input value={email} readOnly className="flex-1 bg-muted" />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleEditTabRemoveEmail(email)}
+                                className="h-9 w-9"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+                          <div className="flex items-center gap-2">
+                            <Input
+                              placeholder="Add email address"
+                              value={editTabNewEmail}
+                              onChange={(e) => setEditTabNewEmail(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  handleEditTabAddEmail();
+                                }
+                              }}
+                              type="email"
+                              className="flex-1"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              onClick={handleEditTabAddEmail}
+                              disabled={!editTabNewEmail.trim() || editTabFormData.businessEmails.includes(editTabNewEmail.trim().toLowerCase())}
+                            >
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Contact Information */}
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-medium text-foreground/80">Contact Information</h3>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="edit-contact-first">First Name</Label>
+                          <Input
+                            id="edit-contact-first"
+                            value={editTabFormData.contactFirstName}
+                            onChange={(e) =>
+                              setEditTabFormData({ ...editTabFormData, contactFirstName: e.target.value })
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="edit-contact-last">Last Name</Label>
+                          <Input
+                            id="edit-contact-last"
+                            value={editTabFormData.contactLastName}
+                            onChange={(e) =>
+                              setEditTabFormData({ ...editTabFormData, contactLastName: e.target.value })
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Business Details */}
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-medium text-foreground/80">Business Details</h3>
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-target-revenue">Target Revenue</Label>
+                        <Input
+                          id="edit-target-revenue"
+                          type="number"
+                          value={editTabFormData.targetRevenue}
+                          onChange={(e) =>
+                            setEditTabFormData({ ...editTabFormData, targetRevenue: e.target.value })
+                          }
+                          placeholder="0"
+                          min="0"
+                          step="0.01"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-services-offered">Services Offered</Label>
+                        <Textarea
+                          id="edit-services-offered"
+                          value={editTabFormData.servicesOffered}
+                          onChange={(e) =>
+                            setEditTabFormData({ ...editTabFormData, servicesOffered: e.target.value })
+                          }
+                          placeholder="Describe the services or products this client offers..."
+                          className="min-h-[100px]"
+                        />
+                        <p className="text-xs text-foreground/50">
+                          This information will be included in script generation to personalize outreach.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-status">Status</Label>
+                        <select
+                          id="edit-status"
+                          value={editTabFormData.status}
+                          onChange={(e) =>
+                            setEditTabFormData({
+                              ...editTabFormData,
+                              status: e.target.value as "active" | "paused" | "inactive",
+                            })
+                          }
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        >
+                          <option value="active">Active</option>
+                          <option value="paused">Paused</option>
+                          <option value="inactive">Inactive</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-4 border-t">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          // Reset form to current client data
+                          if (client) {
+                            const emails = [...(client.businessEmails || [])];
+                            if (client.businessEmail && !emails.includes(client.businessEmail.toLowerCase().trim())) {
+                              emails.unshift(client.businessEmail.toLowerCase().trim());
+                            }
+                            setEditTabFormData({
+                              businessName: client.businessName || "",
+                              businessEmail: client.businessEmail || "",
+                              businessEmails: emails,
+                              contactFirstName: client.contactFirstName || "",
+                              contactLastName: client.contactLastName || "",
+                              targetRevenue: client.targetRevenue?.toString() || "",
+                              servicesOffered: client.servicesOffered || "",
+                              status: client.status || "active",
+                            });
+                            setEditTabNewEmail("");
+                          }
+                        }}
+                      >
+                        Reset
+                      </Button>
+                      <Button type="submit" disabled={isSavingEditTab}>
+                        {isSavingEditTab ? "Saving..." : "Save Changes"}
+                      </Button>
+                    </div>
+                  </form>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Scripts Tab */}
             {activeTab === "scripts" && (
               <div>
@@ -1153,24 +1461,71 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
               </div>
             )}
 
-            {/* Other tabs placeholder */}
-            {activeTab !== "overview" && activeTab !== "transcripts" && activeTab !== "notes" && activeTab !== "scripts" && (
-              <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
-                <CardContent className="py-12 text-center">
-                  <p className="text-sm text-foreground/60 font-light">
-                    {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} content coming soon...
-                  </p>
-                </CardContent>
-              </Card>
+            {/* Call Intelligence Tab */}
+            {activeTab === "call-intelligence" && (
+              <div className="space-y-4">
+                {transcripts && transcripts.length > 0 ? (
+                  transcripts
+                    .filter((t) => t.notes && t.notes.trim().length > 0)
+                    .sort((a, b) => b.date - a.date)
+                    .map((transcript) => (
+                      <Card
+                        key={transcript.transcriptId}
+                        className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md"
+                      >
+                        <CardHeader>
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <CardTitle className="text-base font-medium mb-2">
+                                {transcript.title}
+                              </CardTitle>
+                              <div className="flex items-center gap-4 text-xs text-foreground/60">
+                                <span>
+                                  {new Date(transcript.date).toLocaleDateString("en-US", {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  })}
+                                </span>
+                                {transcript.duration && (
+                                  <span>
+                                    {Math.round(transcript.duration / 60)} min
+                                  </span>
+                                )}
+                                {transcript.participants && transcript.participants.length > 0 && (
+                                  <span>
+                                    {transcript.participants.length} participant
+                                    {transcript.participants.length !== 1 ? "s" : ""}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="prose prose-sm max-w-none">
+                            <div className="text-sm text-foreground/80 whitespace-pre-wrap">
+                              {transcript.notes}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))
+                ) : (
+                  <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
+                    <CardContent className="py-12 text-center">
+                      <p className="text-sm text-foreground/60 font-light">
+                        {transcripts && transcripts.length > 0
+                          ? "No call notes available yet. Notes will appear here once they're generated from your calls."
+                          : "No transcripts found for this client."}
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
             )}
-          </div>
-        </div>
 
-        {/* Footer */}
-        <div className="mt-8 pt-6 border-t border-foreground/10 text-center">
-          <p className="text-sm text-foreground/60 font-light">
-            No scripts yet. Set cadence and click 'Generate Scripts Now'. We'll create the Doc in the client's Drive automatically.
-          </p>
+          </div>
         </div>
       </div>
     </div>

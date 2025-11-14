@@ -2,9 +2,6 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import SignOutButton from "@/components/SignOutButton";
 import DashboardClient from "@/components/DashboardClient";
-import DashboardStats from "@/components/DashboardStats";
-import UpcomingScripts from "@/components/UpcomingScripts";
-import UnlinkedTranscripts from "@/components/UnlinkedTranscripts";
 
 export default async function Dashboard() {
   const user = await getCurrentUser();
@@ -26,25 +23,9 @@ export default async function Dashboard() {
           </p>
         </div>
 
-        {/* Stats Cards */}
-        <DashboardStats email={user.email} />
-
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Clients Section */}
-          <div className="lg:col-span-2">
+        {/* Main Content */}
+        <div>
             <DashboardClient email={user.email} />
-          </div>
-
-          {/* Upcoming Scripts Section */}
-          <div className="lg:col-span-1">
-            <UpcomingScripts email={user.email} />
-          </div>
-        </div>
-
-        {/* Unlinked Transcripts Section */}
-        <div className="mt-6">
-          <UnlinkedTranscripts email={user.email} />
         </div>
 
         {/* Sign Out */}

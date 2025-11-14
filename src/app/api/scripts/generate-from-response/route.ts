@@ -27,6 +27,7 @@ type ClientData = {
   contactFirstName: string | null;
   contactLastName: string | null;
   targetRevenue: number | null;
+  servicesOffered: string | null;
 };
 
 /**
@@ -39,6 +40,7 @@ function extractClientDataFromQAPairs(qaPairs: Array<{ question: string; answer:
     contactFirstName: null,
     contactLastName: null,
     targetRevenue: null,
+    servicesOffered: null,
   };
 
   for (const qa of qaPairs) {
@@ -111,36 +113,46 @@ async function generateScriptContent(
   clientData: ClientData,
   qaPairs: Array<{ question: string; answer: string; fieldRef?: string }>,
   model: string,
-  thinkingEffort: "low" | "medium" | "high"
+  thinkingEffort: "low" | "medium" | "high",
+  ownerEmail: string
 ): Promise<string> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY not configured");
+  // Get OpenRouter API key from Convex (user-specific)
+  if (!convex) {
+    throw new Error("Convex not configured");
   }
+
+  const openrouterConfig = await convex.query(api.openrouter.getConfigForEmail, {
+    email: ownerEmail,
+  });
+
+  // Fallback to environment variable for backwards compatibility
+  const apiKey = openrouterConfig?.apiKey || process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "OpenRouter API key not configured. Please set it in Settings → OpenRouter."
+    );
+  }
+
+  // Get system prompt from Convex (user-specific)
+  const systemPrompt = await convex.query(api.systemPrompts.getSystemPrompt, {
+    email: ownerEmail,
+  });
 
   // Build context from qaPairs
   const contextText = qaPairs
     .map((qa) => `Q: ${qa.question}\nA: ${qa.answer}`)
     .join("\n\n");
 
-  const systemPrompt = `You are an expert video script writer creating personalized outreach scripts for businesses.
-
-Create a professional, engaging video script in HTML format that will be used for outreach. The script should:
-- Be personalized based on the client's information
-- Include clear sections with HTML headings (h1, h2, h3)
-- Use proper HTML formatting (p, ul, ol, li, strong, em tags)
-- Be conversational and engaging
-- Include a strong call-to-action
-- Be approximately 2-3 minutes when read aloud
-
-Format the response as clean HTML without any markdown code blocks or explanations.`;
+  const servicesOfferedText = clientData.servicesOffered 
+    ? `\nServices Offered: ${clientData.servicesOffered}` 
+    : "";
 
   const userPrompt = `Create a personalized video script for:
 
 Business Name: ${clientData.businessName || "Unknown"}
 Contact: ${clientData.contactFirstName || ""} ${clientData.contactLastName || ""}
 Email: ${clientData.businessEmail || "Not provided"}
-Target Revenue: ${clientData.targetRevenue ? `$${clientData.targetRevenue.toLocaleString()}` : "Not specified"}
+Target Revenue: ${clientData.targetRevenue ? `$${clientData.targetRevenue.toLocaleString()}` : "Not specified"}${servicesOfferedText}
 
 Client Information:
 ${contextText}
@@ -362,6 +374,14 @@ export async function POST(request: Request) {
     const thinkingEffort = settings?.defaultThinkingEffort || "medium";
     console.log("[Workflow][DirectAPI] Using settings", JSON.stringify({ model, thinkingEffort }));
 
+    // Fetch client record to get servicesOffered
+    const client = await convex.query(api.clients.getClientById, {
+      clientId: finalClientId as any,
+    });
+    if (client?.servicesOffered) {
+      clientData.servicesOffered = client.servicesOffered;
+    }
+
     // Generate script content
     let scriptHtml: string;
     try {
@@ -374,7 +394,8 @@ export async function POST(request: Request) {
         clientData,
         response.qaPairs,
         model,
-        thinkingEffort
+        thinkingEffort,
+        user.email
       );
       await convex.mutation(api.scriptGeneration.updateStep, {
         runId,

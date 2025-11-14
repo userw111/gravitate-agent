@@ -1,11 +1,43 @@
+import { getCurrentUser } from "@/lib/auth";
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "../../../../convex/_generated/api";
+
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+const convex = convexUrl ? new ConvexHttpClient(convexUrl) : null;
+
 export async function GET() {
   try {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: "Missing OPENROUTER_API_KEY" }), {
+    const user = await getCurrentUser();
+    if (!user?.email) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!convex) {
+      return new Response(JSON.stringify({ error: "Convex not configured" }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    const openrouterConfig = await convex.query(api.openrouter.getConfigForEmail, {
+      email: user.email,
+    });
+
+    // Fallback to environment variable for backwards compatibility
+    const apiKey = openrouterConfig?.apiKey || process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      return new Response(
+        JSON.stringify({
+          error: "OpenRouter API key not configured. Please set it in Settings.",
+        }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
     }
 
     const res = await fetch("https://openrouter.ai/api/v1/credits", {

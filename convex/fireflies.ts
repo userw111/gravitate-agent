@@ -170,6 +170,7 @@ export const storeTranscript = mutation({
     date: v.number(),
     duration: v.optional(v.number()),
     participants: v.optional(v.array(v.string())),
+    notes: v.optional(v.string()),
     clientId: v.optional(v.id("clients")),
     linkingStatus: v.optional(
       v.union(
@@ -209,6 +210,7 @@ export const storeTranscript = mutation({
         date: number;
         duration?: number;
         participants?: string[];
+        notes?: string;
         syncedAt: number;
         clientId?: Id<"clients">;
         linkingStatus?: typeof args.linkingStatus;
@@ -221,6 +223,7 @@ export const storeTranscript = mutation({
         date: args.date,
         duration: args.duration,
         participants: args.participants,
+        notes: args.notes,
         syncedAt: Date.now(),
       };
       
@@ -257,6 +260,7 @@ export const storeTranscript = mutation({
       date: number;
       duration?: number;
       participants?: string[];
+      notes?: string;
       syncedAt: number;
       clientId?: Id<"clients">;
       linkingStatus?: typeof args.linkingStatus;
@@ -272,6 +276,7 @@ export const storeTranscript = mutation({
       date: args.date,
       duration: args.duration,
       participants: args.participants,
+      notes: args.notes,
       syncedAt: Date.now(),
       clientId: args.clientId,
     };

@@ -12,6 +12,7 @@ type ClientData = {
   contactFirstName: string | null;
   contactLastName: string | null;
   targetRevenue: number | null;
+  servicesOffered: string | null;
 };
 
 /**
@@ -20,31 +21,41 @@ type ClientData = {
 async function generateScriptContentFromClient(
   clientData: ClientData,
   model: string,
-  thinkingEffort: "low" | "medium" | "high"
+  thinkingEffort: "low" | "medium" | "high",
+  ownerEmail: string
 ): Promise<string> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY not configured");
+  // Get OpenRouter API key from Convex (user-specific)
+  if (!convex) {
+    throw new Error("Convex not configured");
   }
 
-  const systemPrompt = `You are an expert video script writer creating personalized outreach scripts for businesses.
+  const openrouterConfig = await convex.query(api.openrouter.getConfigForEmail, {
+    email: ownerEmail,
+  });
 
-Create a professional, engaging video script in HTML format that will be used for outreach. The script should:
-- Be personalized based on the client's information
-- Include clear sections with HTML headings (h1, h2, h3)
-- Use proper HTML formatting (p, ul, ol, li, strong, em tags)
-- Be conversational and engaging
-- Include a strong call-to-action
-- Be approximately 2-3 minutes when read aloud
+  // Fallback to environment variable for backwards compatibility
+  const apiKey = openrouterConfig?.apiKey || process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "OpenRouter API key not configured. Please set it in Settings → OpenRouter."
+    );
+  }
 
-Format the response as clean HTML without any markdown code blocks or explanations.`;
+  // Get system prompt from Convex (user-specific)
+  const systemPrompt = await convex.query(api.systemPrompts.getSystemPrompt, {
+    email: ownerEmail,
+  });
+
+  const servicesOfferedText = clientData.servicesOffered 
+    ? `\nServices Offered: ${clientData.servicesOffered}` 
+    : "";
 
   const userPrompt = `Create a personalized video script for:
 
 Business Name: ${clientData.businessName || "Unknown"}
 Contact: ${clientData.contactFirstName || ""} ${clientData.contactLastName || ""}
 Email: ${clientData.businessEmail || "Not provided"}
-Target Revenue: ${clientData.targetRevenue ? `$${clientData.targetRevenue.toLocaleString()}` : "Not specified"}
+Target Revenue: ${clientData.targetRevenue ? `$${clientData.targetRevenue.toLocaleString()}` : "Not specified"}${servicesOfferedText}
 
 Generate the script as HTML with proper structure.`;
 
@@ -99,9 +110,10 @@ export async function POST(request: Request) {
     const body = await request.json() as {
       clientId: string;
       email?: string; // Optional - for internal calls
+      force?: boolean; // Optional - force generation even if scripts exist
     };
 
-    const { clientId, email: providedEmail } = body;
+    const { clientId, email: providedEmail, force } = body;
 
     // Get user - either from auth or from provided email (for internal calls)
     let user: { id: string; email: string } | null = null;
@@ -150,23 +162,25 @@ export async function POST(request: Request) {
       ownerEmail: user.email,
     });
 
-    // If client was just created (within last 5 minutes) and has no scripts, generate one
-    // Otherwise, check if we should skip (e.g., if script was already generated)
-    const clientAge = Date.now() - client.createdAt;
-    const isNewClient = clientAge < 5 * 60 * 1000; // 5 minutes
+    // If force is true, skip idempotency check (for manual generation)
+    // Otherwise, check if client was just created (within last 5 minutes) and has no scripts
+    if (!force) {
+      const clientAge = Date.now() - client.createdAt;
+      const isNewClient = clientAge < 5 * 60 * 1000; // 5 minutes
 
-    if (!isNewClient && recentScripts.length > 0) {
-      console.log("[Script Generation] Client is not new or already has scripts - skipping", {
-        clientId,
-        clientAge,
-        scriptCount: recentScripts.length,
-      });
-      return NextResponse.json({
-        success: true,
-        message: "Client already has scripts or is not new",
-        scriptId: recentScripts[0]._id,
-        skipped: true,
-      });
+      if (!isNewClient && recentScripts.length > 0) {
+        console.log("[Script Generation] Client is not new or already has scripts - skipping", {
+          clientId,
+          clientAge,
+          scriptCount: recentScripts.length,
+        });
+        return NextResponse.json({
+          success: true,
+          message: "Client already has scripts or is not new",
+          scriptId: recentScripts[0]._id,
+          skipped: true,
+        });
+      }
     }
 
     // Extract client data
@@ -176,6 +190,7 @@ export async function POST(request: Request) {
       contactFirstName: client.contactFirstName || null,
       contactLastName: client.contactLastName || null,
       targetRevenue: client.targetRevenue || null,
+      servicesOffered: client.servicesOffered || null,
     };
 
     if (!clientData.businessName) {
@@ -199,7 +214,8 @@ export async function POST(request: Request) {
       scriptHtml = await generateScriptContentFromClient(
         clientData,
         model,
-        thinkingEffort
+        thinkingEffort,
+        user.email
       );
       console.log("[Script Generation] Script content generated", {
         clientId,

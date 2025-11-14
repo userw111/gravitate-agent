@@ -18,7 +18,7 @@ import ChatClient from "./ChatClient";
 import { ModelSelector } from "./ModelSelector";
 import { ThinkingEffortSelector } from "./ThinkingEffortSelector";
 import type { ThinkingEffort } from "./ModelSelector";
-import { ZoomIn, ZoomOut, Bold as BoldIcon, Italic as ItalicIcon, Heading1, Heading2, Heading3, List, ListOrdered, Quote, Code as CodeIcon, Minus, Undo2, Redo2, Pilcrow, Link2, Link2Off } from "lucide-react";
+import { ZoomIn, ZoomOut, Bold as BoldIcon, Italic as ItalicIcon, Heading1, Heading2, Heading3, List, ListOrdered, Quote, Code as CodeIcon, Minus, Undo2, Redo2, Pilcrow, Link2, Link2Off, Plus, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import TiptapLink from "@tiptap/extension-link";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -57,6 +57,7 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
   const isUserEditingRef = React.useRef(false);
   const lastAIContentRef = React.useRef<string>("");
   const [isCopying, setIsCopying] = React.useState(false);
+  const [isCreatingDoc, setIsCreatingDoc] = React.useState(false);
   const [toolbarVersion, setToolbarVersion] = React.useState(0);
   const [isLinkDialogOpen, setIsLinkDialogOpen] = React.useState(false);
   const [linkUrl, setLinkUrl] = React.useState("");
@@ -72,6 +73,8 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
   const isDialogOpenRef = React.useRef(isDialogOpen);
   const [aiFlash, setAiFlash] = React.useState(false);
   const aiStreamTimersRef = React.useRef<number[]>([]);
+  const [isGenerateDialogOpen, setIsGenerateDialogOpen] = React.useState(false);
+  const [isGenerating, setIsGenerating] = React.useState(false);
   
   // Currently selected script doc
   const selectedScript = selectedScriptId && scripts
@@ -295,6 +298,39 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
     }
   };
 
+  const handleGenerateScript = React.useCallback(async () => {
+    // Close dialog immediately
+    setIsGenerateDialogOpen(false);
+    setIsGenerating(true);
+    try {
+      const response = await fetch("/api/scripts/generate-from-client", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          clientId,
+          force: true, // Force generation even if scripts exist
+        }),
+      });
+
+      if (!response.ok) {
+        const error = (await response.json()) as { error?: string; details?: string };
+        throw new Error(error.error || error.details || "Failed to generate script");
+      }
+
+      const result = (await response.json()) as { success: boolean; scriptId?: string };
+      if (result.success) {
+        // Script will appear automatically when the query refetches
+      }
+    } catch (error) {
+      console.error("Failed to generate script:", error);
+      alert(error instanceof Error ? error.message : "Failed to generate script");
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [clientId]);
+
   // Auto-save script content when user edits
   React.useEffect(() => {
     if (selectedScriptId && scriptContent && isUserEditingRef.current && handleAutoSaveRef.current) {
@@ -418,6 +454,47 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
       setIsCopying(false);
     }
   }, [scriptContent]);
+
+  const handleOpenInGoogleDrive = React.useCallback(async () => {
+    try {
+      setIsCreatingDoc(true);
+      const html = editorRef.current ? editorRef.current.getHTML() : scriptContent || "";
+      if (!html || html.trim().length === 0) {
+        console.warn("No content to create document");
+        setIsCreatingDoc(false);
+        return;
+      }
+
+      const title = selectedScript?.title || "Script";
+
+      const response = await fetch("/api/google-drive/create-doc", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title,
+          content: html,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = (await response.json()) as { error?: string };
+        throw new Error(error.error || "Failed to create Google Doc");
+      }
+
+      const data = (await response.json()) as { url?: string };
+      if (data.url) {
+        // Open in new tab
+        window.open(data.url, "_blank");
+      }
+    } catch (err) {
+      console.error("Failed to create Google Doc:", err);
+      alert(err instanceof Error ? err.message : "Failed to create Google Doc");
+    } finally {
+      setIsCreatingDoc(false);
+    }
+  }, [scriptContent, selectedScript]);
 
   const handleLinkSave = React.useCallback(() => {
     if (!editor) return;
@@ -643,17 +720,39 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
 
   return (
     <div className="space-y-4">
-      {scripts.length === 0 ? (
-        <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
-          <div className="p-12 text-center">
-            <p className="text-sm text-foreground/60 font-light">
-              No scripts yet. Scripts will appear here once they are automatically generated.
-            </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        {/* Add Script Tile - Always First */}
+        <Card
+          className={cn(
+            "bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md transition-shadow border-dashed",
+            isGenerating 
+              ? "cursor-not-allowed opacity-75" 
+              : "cursor-pointer hover:shadow-lg"
+          )}
+          onClick={() => !isGenerating && setIsGenerateDialogOpen(true)}
+        >
+          <div className="p-4 flex flex-col items-center justify-center min-h-[120px]">
+            {isGenerating ? (
+              <Loader2 className="h-8 w-8 text-foreground/40 mb-2 animate-spin" />
+            ) : (
+              <Plus className="h-8 w-8 text-foreground/40 mb-2" />
+            )}
+            <div className="text-sm font-medium text-foreground/60">
+              {isGenerating ? "Generating..." : "Generate Script"}
+            </div>
           </div>
         </Card>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {scripts.map((script) => (
+        
+        {scripts.length === 0 ? (
+          <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md col-span-full sm:col-span-2 md:col-span-3 lg:col-span-3">
+            <div className="p-12 text-center">
+              <p className="text-sm text-foreground/60 font-light">
+                No scripts yet. Click the button above to generate your first script.
+              </p>
+            </div>
+          </Card>
+        ) : (
+          scripts.map((script) => (
             <Card
               key={script._id}
               className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md cursor-pointer hover:shadow-lg transition-shadow"
@@ -668,9 +767,31 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
                 </div>
               </div>
             </Card>
-          ))}
-        </div>
-      )}
+          ))
+        )}
+      </div>
+
+      {/* Generate Script Dialog */}
+      <Dialog open={isGenerateDialogOpen} onOpenChange={setIsGenerateDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Generate Script?</DialogTitle>
+            <DialogDescription>
+              This will create a new script for this client. The script will be generated using the client's information and will not affect the scheduled cron jobs.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline" disabled={isGenerating}>
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button onClick={handleGenerateScript} disabled={isGenerating}>
+              {isGenerating ? "Generating..." : "Generate Script"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-[90vw] w-[90vw] max-h-[90vh] h-[90vh] flex flex-col p-0 gap-0 sm:max-w-[90vw]">
@@ -1143,6 +1264,14 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
                       className="cursor-pointer hover:bg-accent hover:text-accent-foreground transition-all duration-200"
                     >
                       {isCopying ? "Copying..." : "Copy Rich Text"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={isCreatingDoc || !editor}
+                      onClick={handleOpenInGoogleDrive}
+                      className="cursor-pointer hover:bg-accent hover:text-accent-foreground transition-all duration-200"
+                    >
+                      {isCreatingDoc ? "Creating..." : "Open in Google Docs"}
                     </Button>
                     {/* Drive folders */}
                     {!driveMonthLink ? (

@@ -217,9 +217,21 @@ export async function POST(request: Request) {
           sendLog(controller, "🤖 Step 6: Generating script with AI...", "info");
           sendLog(controller, `   Calling OpenRouter API (${model})...`, "info");
           
-          const apiKey = process.env.OPENROUTER_API_KEY;
+          // Get OpenRouter API key from Convex (user-specific)
+          const openrouterConfig = await convex.query(
+            api.openrouter.getConfigForEmail,
+            {
+              email: user.email,
+            }
+          );
+
+          // Fallback to environment variable for backwards compatibility
+          const apiKey =
+            openrouterConfig?.apiKey || process.env.OPENROUTER_API_KEY;
           if (!apiKey) {
-            throw new Error("OPENROUTER_API_KEY not configured");
+            throw new Error(
+              "OpenRouter API key not configured. Please set it in Settings → OpenRouter."
+            );
           }
 
           const systemPrompt = `You are an expert video script writer creating personalized outreach scripts for businesses.

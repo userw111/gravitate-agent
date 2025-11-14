@@ -71,11 +71,19 @@ export async function POST(request: Request) {
       });
     }
 
-    // Use Next.js environment variable (not Convex)
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    // Get OpenRouter API key from Convex (user-specific)
+    const openrouterConfig = await convex.query(api.openrouter.getConfigForEmail, {
+      email,
+    });
+
+    // Fallback to environment variable for backwards compatibility
+    const apiKey = openrouterConfig?.apiKey || process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: "OPENROUTER_API_KEY not configured in Next.js environment" },
+        {
+          error:
+            "OpenRouter API key not configured. Please set it in Settings → OpenRouter.",
+        },
         { status: 500 }
       );
     }

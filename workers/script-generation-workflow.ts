@@ -220,7 +220,9 @@ export default {
         throw new Error("OPENROUTER_API_KEY not configured");
       }
 
-      const systemPrompt = `You are an expert video script writer creating personalized outreach scripts for businesses.
+      // Note: In production, this should fetch from Convex using api.systemPrompts.getSystemPrompt
+      // For now, using default prompt with HTML formatting instruction appended automatically
+      const baseSystemPrompt = `You are an expert video script writer creating personalized outreach scripts for businesses.
 
 Create a professional, engaging video script in HTML format that will be used for outreach. The script should:
 - Be personalized based on the client's information
@@ -228,9 +230,9 @@ Create a professional, engaging video script in HTML format that will be used fo
 - Use proper HTML formatting (p, ul, ol, li, strong, em tags)
 - Be conversational and engaging
 - Include a strong call-to-action
-- Be approximately 2-3 minutes when read aloud
+- Be approximately 2-3 minutes when read aloud`;
 
-Format the response as clean HTML without any markdown code blocks or explanations.`;
+      const systemPrompt = baseSystemPrompt + "\n\nFormat the response as clean HTML without any markdown code blocks or explanations.";
 
       const contextText = response.qaPairs
         .map((qa) => `Q: ${qa.question}\nA: ${qa.answer}`)
