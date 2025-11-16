@@ -1,6 +1,5 @@
-import { ChatMode } from '@repo@/features/llmchat/shared/config';
+import { ChatMode } from '../shared/config';
 import { CoreMessage } from 'ai';
-import { ProviderEnumType } from './providers';
 
 export enum ModelEnum {
     GPT_4o_Mini = 'gpt-4o-mini',
@@ -17,6 +16,8 @@ export enum ModelEnum {
     Deepseek_R1 = 'accounts/fireworks/models/deepseek-r1',
     Claude_3_7_Sonnet = 'claude-3-7-sonnet-20250219',
 }
+
+export type ProviderEnumType = 'openai' | 'together' | 'fireworks' | 'anthropic' | 'google';
 
 export type Model = {
     id: ModelEnum;

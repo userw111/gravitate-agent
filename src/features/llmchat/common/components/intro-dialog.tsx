@@ -98,23 +98,24 @@ export const IntroDialog = () => {
                             {points.map((point, index) => (
                                 <div key={index} className="flex-inline flex items-start gap-2">
                                     {point.icon}
-                                    <ReactMarkdown
-                                        className="text-sm"
-                                        components={{
-                                            p: ({ children }) => (
-                                                <p className="text-muted-foreground text-sm">
-                                                    {children}
-                                                </p>
-                                            ),
-                                            strong: ({ children }) => (
-                                                <span className="text-sm font-semibold">
-                                                    {children}
-                                                </span>
-                                            ),
-                                        }}
-                                    >
-                                        {point.text}
-                                    </ReactMarkdown>
+                                    <div className="text-sm">
+                                        <ReactMarkdown
+                                            components={{
+                                                p: ({ children }) => (
+                                                    <p className="text-muted-foreground text-sm">
+                                                        {children}
+                                                    </p>
+                                                ),
+                                                strong: ({ children }) => (
+                                                    <span className="text-sm font-semibold">
+                                                        {children}
+                                                    </span>
+                                                ),
+                                            }}
+                                        >
+                                            {point.text}
+                                        </ReactMarkdown>
+                                    </div>
                                 </div>
                             ))}
                         </div>

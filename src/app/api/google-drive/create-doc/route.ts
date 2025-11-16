@@ -343,14 +343,21 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       title?: string;
       content: string; // HTML content
+      parentFolderId?: string; // Optional parent folder ID
     };
 
     if (!body?.content) {
       return NextResponse.json({ error: "Content is required" }, { status: 400 });
     }
 
-    // Load Google Drive tokens
-    const cfg = await convex.query(api.googleDrive.getConfigForEmail, { email: user.email });
+    // Get user's organization
+    const org = await convex.query(api.organizations.getOrganizationForUser, { email: user.email });
+    if (!org) {
+      return NextResponse.json({ error: "Organization not found" }, { status: 400 });
+    }
+
+    // Load Google Drive tokens for organization
+    const cfg = await convex.query(api.googleDrive.getConfigForOrganization, { organizationId: org._id });
     if (!cfg?.accessToken || !cfg?.refreshToken) {
       return NextResponse.json({ error: "Google Drive not connected" }, { status: 400 });
     }
@@ -363,8 +370,9 @@ export async function POST(request: Request) {
         const refreshed = await refreshAccessToken(cfg.refreshToken);
         accessToken = refreshed.access_token;
         const newExpiry = Date.now() + refreshed.expires_in * 1000;
-        await convex.mutation(api.googleDrive.setTokensForEmail, {
-          email: user.email,
+        await convex.mutation(api.googleDrive.setTokensForOrganization, {
+          organizationId: org._id,
+          connectedByEmail: cfg.connectedByEmail,
           accessToken,
           refreshToken: refreshed.refresh_token || cfg.refreshToken,
           tokenExpiry: newExpiry,
@@ -380,10 +388,17 @@ export async function POST(request: Request) {
     // Approach A (preferred): Import original HTML via Drive multipart upload (Google will convert to Docs)
     // This preserves formatting closest to what Google Docs sees during paste.
     const boundary = "====multipart-boundary-" + Math.random().toString(36).slice(2);
-    const metadata = {
+    const metadata: {
+      name: string;
+      mimeType: string;
+      parents?: string[];
+    } = {
       name: body.title || "New Document",
       mimeType: "application/vnd.google-apps.document",
     };
+    if (body.parentFolderId) {
+      metadata.parents = [body.parentFolderId];
+    }
     const multipartBody =
       `--${boundary}\r\n` +
       `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
@@ -418,16 +433,25 @@ export async function POST(request: Request) {
 
     // Fallback B: Create empty doc + Docs API batchUpdate (our HTML→Docs converter)
     if (!createdDoc) {
+      const createDocBody: {
+        name: string;
+        mimeType: string;
+        parents?: string[];
+      } = {
+        name: body.title || "New Document",
+        mimeType: "application/vnd.google-apps.document",
+      };
+      if (body.parentFolderId) {
+        createDocBody.parents = [body.parentFolderId];
+      }
+
       const createRes = await fetchWithAuth(
         `${DRIVE_API_BASE}/files?fields=id,name,webViewLink`,
         accessToken,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: body.title || "New Document",
-            mimeType: "application/vnd.google-apps.document",
-          }),
+          body: JSON.stringify(createDocBody),
         }
       );
 

@@ -18,12 +18,14 @@
         "name": "next"
       }
     ],
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@repo@/*": ["./src/*"]
     },
     "types": [
-        "./cloudflare-env.d.ts",
-        "node"
+      "./cloudflare-env.d.ts",
+      "node"
     ]
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

@@ -1,7 +1,7 @@
 import { IconPlus } from '@tabler/icons-react';
 
 import { useMcpToolsStore } from '@repo@/features/llmchat/common/store';
-import { Button } from '@repo@/features/llmchat/ui/src/components/button';
+import { Button } from '@repo@/features/llmchat/ui';
 
 import {
     Badge,

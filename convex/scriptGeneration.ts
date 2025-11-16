@@ -10,8 +10,44 @@ export const startRun = mutation({
     clientId: v.optional(v.id("clients")),
   },
   handler: async (ctx: MutationCtx, args) => {
+    // Get organizationId from client or ownerEmail
+    let organizationId: Id<"organizations">;
+    if (args.clientId) {
+      const client = await ctx.db.get(args.clientId);
+      if (!client || !client.organizationId) {
+        throw new Error("Client not found or missing organization");
+      }
+      organizationId = client.organizationId;
+    } else {
+      // Get or create organization for ownerEmail
+      let member = await ctx.db
+        .query("organization_members")
+        .withIndex("by_email", (q) => q.eq("email", args.ownerEmail))
+        .first();
+      
+      if (member) {
+        organizationId = member.organizationId;
+      } else {
+        // Create default organization for user inline
+        const orgNow = Date.now();
+        organizationId = await ctx.db.insert("organizations", {
+          name: `${args.ownerEmail.split("@")[0]}'s Organization`,
+          createdAt: orgNow,
+          updatedAt: orgNow,
+        });
+        await ctx.db.insert("organization_members", {
+          organizationId,
+          email: args.ownerEmail,
+          role: "owner",
+          createdAt: orgNow,
+          updatedAt: orgNow,
+        });
+      }
+    }
+
     const now = Date.now();
     const runId = await ctx.db.insert("script_generation_runs", {
+      organizationId,
       ownerEmail: args.ownerEmail,
       responseId: args.responseId,
       clientId: args.clientId,

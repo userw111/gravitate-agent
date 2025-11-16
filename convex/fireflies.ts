@@ -249,8 +249,44 @@ export const storeTranscript = mutation({
       return existing._id;
     }
     
+    // Get organizationId from client or email
+    let organizationId: Id<"organizations">;
+    if (args.clientId) {
+      const client = await ctx.db.get(args.clientId);
+      if (!client || !client.organizationId) {
+        throw new Error("Client not found or missing organization");
+      }
+      organizationId = client.organizationId;
+    } else {
+      // Get or create organization for email
+      let member = await ctx.db
+        .query("organization_members")
+        .withIndex("by_email", (q) => q.eq("email", args.email))
+        .first();
+      
+      if (member) {
+        organizationId = member.organizationId;
+      } else {
+        // Create default organization for user inline
+        const now = Date.now();
+        organizationId = await ctx.db.insert("organizations", {
+          name: `${args.email.split("@")[0]}'s Organization`,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await ctx.db.insert("organization_members", {
+          organizationId,
+          email: args.email,
+          role: "owner",
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+
     // Insert new transcript
     const record: {
+      organizationId: Id<"organizations">;
       email: string;
       transcriptId: string;
       meetingId: string;
@@ -267,6 +303,7 @@ export const storeTranscript = mutation({
       lastLinkAttemptAt?: number;
       linkingHistory?: LinkingHistoryEntry[];
     } = {
+      organizationId,
       email: args.email,
       transcriptId: args.transcriptId,
       meetingId: args.meetingId,

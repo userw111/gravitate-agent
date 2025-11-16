@@ -275,27 +275,80 @@ export const getAllResponsesForEmail = query({
 export const getUnlinkedResponsesCountForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
-    // Get all responses
-    const allResponses = await ctx.db
-      .query("typeform_responses")
-      .withIndex("by_email_synced", (q) => q.eq("email", args.email))
-      .collect();
-    
-    // Get all clients
-    const allClients = await ctx.db
-      .query("clients")
-      .withIndex("by_owner", (q) => q.eq("ownerEmail", args.email))
-      .collect();
-    
-    // Create a set of responseIds that have clients
-    const linkedResponseIds = new Set(
-      allClients
-        .map((c) => c.onboardingResponseId)
-        .filter((id): id is string => id !== undefined)
+    const timestamp = new Date().toISOString();
+    console.log(
+      "[TYPEFORM] getUnlinkedResponsesCountForEmail called",
+      JSON.stringify(
+        {
+          email: args.email,
+          timestamp,
+        },
+        null,
+        2
+      )
     );
-    
-    // Return count of unlinked responses
-    return allResponses.filter((r) => !linkedResponseIds.has(r.responseId)).length;
+
+    try {
+      // Get all responses
+      const allResponses = await ctx.db
+        .query("typeform_responses")
+        .withIndex("by_email_synced", (q) => q.eq("email", args.email))
+        .collect();
+
+      // Get all clients
+      const allClients = await ctx.db
+        .query("clients")
+        .withIndex("by_owner", (q) => q.eq("ownerEmail", args.email))
+        .collect();
+
+      // Create a set of responseIds that have clients
+      const linkedResponseIds = new Set(
+        allClients
+          .map((c) => c.onboardingResponseId)
+          .filter((id): id is string => id !== undefined)
+      );
+
+      const unlinkedResponses = allResponses.filter(
+        (r) => !linkedResponseIds.has(r.responseId)
+      );
+
+      console.log(
+        "[TYPEFORM] getUnlinkedResponsesCountForEmail computed result",
+        JSON.stringify(
+          {
+            email: args.email,
+            timestamp,
+            totalResponses: allResponses.length,
+            totalClients: allClients.length,
+            linkedResponseIdsCount: linkedResponseIds.size,
+            unlinkedCount: unlinkedResponses.length,
+            sampleResponseIds: allResponses.slice(0, 5).map((r) => r.responseId),
+            sampleLinkedIds: Array.from(linkedResponseIds).slice(0, 5),
+          },
+          null,
+          2
+        )
+      );
+
+      // Return count of unlinked responses
+      return unlinkedResponses.length;
+    } catch (error) {
+      console.error(
+        "[TYPEFORM] getUnlinkedResponsesCountForEmail error",
+        JSON.stringify(
+          {
+            email: args.email,
+            timestamp,
+            message: (error as any)?.message,
+            name: (error as any)?.name,
+            stack: (error as any)?.stack,
+          },
+          null,
+          2
+        )
+      );
+      throw error;
+    }
   },
 });
 

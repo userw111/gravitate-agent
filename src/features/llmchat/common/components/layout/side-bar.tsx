@@ -1,7 +1,8 @@
 import { SignInButton, useAuth, UserButton } from '@clerk/nextjs';
 import { FullPageLoader, HistoryItem } from '@repo@/features/llmchat/common/components';
 import { useRootContext } from '@repo@/features/llmchat/common/context';
-import { Thread, useAppStore, useChatStore } from '@repo@/features/llmchat/common/store';
+import { useAppStore, useChatStore } from '@repo@/features/llmchat/common/store';
+import type { Thread } from '@repo@/features/llmchat/shared/types';
 import { Button, cn, Flex } from '@repo@/features/llmchat/ui';
 import { IconArrowBarLeft, IconArrowBarRight, IconPlus, IconSearch } from '@tabler/icons-react';
 import moment from 'moment';
@@ -14,6 +15,8 @@ export const Sidebar = () => {
     const { push } = useRouter();
     const isChatPage = pathname.startsWith('/chat');
     const threads = useChatStore(state => state.threads);
+    const pinThread = useChatStore(state => state.pinThread);
+    const unpinThread = useChatStore(state => state.unpinThread);
     const { isSignedIn } = useAuth();
     const sortThreads = (threads: Thread[], sortBy: 'createdAt') => {
         return [...threads].sort((a, b) => moment(b[sortBy]).diff(moment(a[sortBy])));
@@ -64,6 +67,9 @@ export const Sidebar = () => {
                                 setIsSidebarOpen(prev => false);
                             }}
                             isActive={thread.id === currentThreadId}
+                            isPinned={thread.pinned}
+                            pinThread={pinThread}
+                            unpinThread={unpinThread}
                         />
                     ))}
                 </Flex>
@@ -74,7 +80,7 @@ export const Sidebar = () => {
     return (
         <div
             className={cn(
-                'border-border/0 relative bottom-0 left-0 top-0 z-[50] flex h-[100dvh] flex-shrink-0 flex-col border-r border-dashed py-2 transition-all duration-200',
+                'border-border/0 relative bottom-0 left-0 top-0 z-50 flex h-dvh shrink-0 flex-col border-r border-dashed py-2 transition-all duration-200',
                 isSidebarOpen
                     ? 'bg-background border-border/70 shadow-xs top-0 h-full w-[240px] border-r'
                     : 'w-[50px]'

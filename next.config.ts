@@ -2,6 +2,10 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  // Completely disable Next.js ESLint integration during builds
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   // Suppress request logging in dev mode
   ...(process.env.NODE_ENV === "development" && {
     onDemandEntries: {

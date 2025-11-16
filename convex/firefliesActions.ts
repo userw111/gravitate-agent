@@ -1124,7 +1124,7 @@ The meeting concluded with action items for next week.`,
         };
       }
 
-      const aiResult = await linkingResponse.json();
+      const aiResult: any = await linkingResponse.json();
       
       if (aiResult.status === "linked") {
         return {

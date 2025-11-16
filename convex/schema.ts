@@ -2,6 +2,23 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  // Organizations - groups of users that share data
+  organizations: defineTable({
+    name: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }),
+  // Organization members - users belonging to organizations
+  organization_members: defineTable({
+    organizationId: v.id("organizations"),
+    email: v.string(),
+    role: v.union(v.literal("owner"), v.literal("admin"), v.literal("member")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_email", ["email"])
+    .index("by_organization_email", ["organizationId", "email"]),
   users: defineTable({
     email: v.string(),
     createdAt: v.number(),
@@ -64,8 +81,9 @@ export default defineSchema({
     .index("by_email", ["email"])
     .index("by_email_received", ["email", "receivedAt"]),
   clients: defineTable({
-    // Platform owner (your client)
-    ownerEmail: v.string(),
+    // Organization that owns this client
+    organizationId: v.id("organizations"),
+    ownerEmail: v.optional(v.string()), // Deprecated - kept for migration compatibility
     
     // Business identification (from Typeform)
     businessEmail: v.optional(v.string()), // Primary identifier - email from onboarding
@@ -99,11 +117,13 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
-    .index("by_owner", ["ownerEmail"])
+    .index("by_organization", ["organizationId"])
+    .index("by_owner", ["ownerEmail"]) // Keep for migration
     .index("by_business_email", ["businessEmail"])
-    .index("by_owner_business_email", ["ownerEmail", "businessEmail"]),
+    .index("by_owner_business_email", ["ownerEmail", "businessEmail"]), // Keep for migration
   fireflies_transcripts: defineTable({
-    email: v.string(), // Platform owner email
+    organizationId: v.id("organizations"),
+    email: v.optional(v.string()), // Deprecated - kept for migration
     transcriptId: v.string(),
     meetingId: v.string(),
     title: v.string(),
@@ -149,14 +169,18 @@ export default defineSchema({
       )
     ),
   })
-    .index("by_email", ["email"])
-    .index("by_email_synced", ["email", "syncedAt"])
+    .index("by_organization", ["organizationId"])
+    .index("by_email", ["email"]) // Keep for migration
+    .index("by_organization_synced", ["organizationId", "syncedAt"])
+    .index("by_email_synced", ["email", "syncedAt"]) // Keep for migration
     .index("by_transcript_id", ["transcriptId"])
     .index("by_meeting_id", ["meetingId"])
     .index("by_client", ["clientId"])
-    .index("by_email_unlinked", ["email", "clientId"]), // For finding unlinked transcripts
+    .index("by_organization_unlinked", ["organizationId", "clientId"])
+    .index("by_email_unlinked", ["email", "clientId"]), // Keep for migration
   scripts: defineTable({
-    ownerEmail: v.string(),
+    organizationId: v.id("organizations"),
+    ownerEmail: v.optional(v.string()), // Deprecated - kept for migration
     clientId: v.id("clients"),
     title: v.string(),
     contentHtml: v.string(), // HTML content matching TipTap format
@@ -171,11 +195,13 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_organization", ["organizationId", "createdAt"])
     .index("by_client", ["clientId", "createdAt"])
-    .index("by_owner", ["ownerEmail", "createdAt"])
+    .index("by_owner", ["ownerEmail", "createdAt"]) // Keep for migration
     .index("by_source_response", ["source.responseId"]),
   script_settings: defineTable({
-    email: v.string(),
+    organizationId: v.id("organizations"),
+    email: v.optional(v.string()), // Deprecated - kept for migration
     defaultModel: v.optional(v.string()), // Default model for script generation
     defaultThinkingEffort: v.optional(v.union(v.literal("low"), v.literal("medium"), v.literal("high"))),
     // Feature flags / preferences
@@ -188,9 +214,12 @@ export default defineSchema({
     cronJobTemplate: v.optional(v.array(v.number())), // Deprecated - schedule is fixed: 25d, then 30d, then monthly
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_email", ["email"]),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_email", ["email"]), // Keep for migration
   script_generation_runs: defineTable({
-    ownerEmail: v.string(),
+    organizationId: v.id("organizations"),
+    ownerEmail: v.optional(v.string()), // Deprecated - kept for migration
     responseId: v.optional(v.string()),
     clientId: v.optional(v.id("clients")),
     // high-level status of the run
@@ -213,10 +242,13 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
-    .index("by_owner", ["ownerEmail", "createdAt"])
-    .index("by_owner_response", ["ownerEmail", "responseId"]),
+    .index("by_organization", ["organizationId", "createdAt"])
+    .index("by_owner", ["ownerEmail", "createdAt"]) // Keep for migration
+    .index("by_organization_response", ["organizationId", "responseId"])
+    .index("by_owner_response", ["ownerEmail", "responseId"]), // Keep for migration
   cron_jobs: defineTable({
-    ownerEmail: v.string(),
+    organizationId: v.id("organizations"),
+    ownerEmail: v.optional(v.string()), // Deprecated - kept for migration
     clientId: v.id("clients"),
     cronJobId: v.string(), // Cloudflare cron job ID
     scheduledTime: v.number(), // Unix timestamp when this job should run
@@ -231,13 +263,15 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_client", ["clientId"])
-    .index("by_owner", ["ownerEmail"])
+    .index("by_owner", ["ownerEmail"]) // Keep for migration
     .index("by_scheduled_time", ["scheduledTime"])
     .index("by_status", ["status"])
     .index("by_cron_id", ["cronJobId"]),
   google_drive_configs: defineTable({
-    email: v.string(),
+    organizationId: v.id("organizations"),
+    connectedByEmail: v.string(), // Email of user who connected the account
     accessToken: v.optional(v.string()),
     refreshToken: v.optional(v.string()),
     tokenExpiry: v.optional(v.number()), // Unix timestamp when access token expires
@@ -245,7 +279,9 @@ export default defineSchema({
     userName: v.optional(v.string()), // Google account display name
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_email", ["email"]),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_email", ["connectedByEmail"]), // Keep for backwards compatibility during migration
   openrouter_configs: defineTable({
     email: v.string(),
     apiKey: v.optional(v.string()),
@@ -258,6 +294,18 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_email", ["email"]),
+  ad_briefings: defineTable({
+    organizationId: v.id("organizations"),
+    ownerEmail: v.optional(v.string()), // Deprecated - kept for migration
+    clientId: v.id("clients"),
+    // Stored as a JSON object matching AdStrategistBriefing on the frontend
+    briefing: v.any(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_client", ["clientId"])
+    .index("by_owner_client", ["ownerEmail", "clientId"]), // Keep for migration
 });
 
 

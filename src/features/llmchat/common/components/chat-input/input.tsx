@@ -39,7 +39,7 @@ export const ChatInput = ({
             if (typeof window !== 'undefined' && !isFollowUp && !isSignedIn) {
                 const draftMessage = window.localStorage.getItem('draft-message');
                 if (draftMessage) {
-                    editor.commands.setContent(draftMessage, true, { preserveWhitespace: true });
+                    editor.commands.setContent(draftMessage);
                 }
             }
         },
@@ -129,7 +129,7 @@ export const ChatInput = ({
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             transition={{ duration: 0.15 }}
-                            className="flex w-full flex-shrink-0 overflow-hidden rounded-lg"
+                            className="flex w-full shrink-0 overflow-hidden rounded-lg"
                         >
                             {editor?.isEditable ? (
                                 <motion.div
@@ -305,7 +305,7 @@ const AnimatedTitles = ({ titles = [] }: AnimatedTitlesProps) => {
                         duration: 0.8,
                         ease: 'easeInOut',
                     }}
-                    className="from-muted-foreground/50 via-muted-foreground/40 to-muted-foreground/20 bg-gradient-to-r bg-clip-text text-center text-[32px] font-semibold tracking-tight text-transparent"
+                    className="from-muted-foreground/50 via-muted-foreground/40 to-muted-foreground/20 bg-linear-to-r bg-clip-text text-center text-[32px] font-semibold tracking-tight text-transparent"
                 >
                     {greeting}
                 </motion.h1>

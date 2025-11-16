@@ -61,6 +61,16 @@ export default function Navbar({ user }: { user: NavbarUser | null }) {
               Dashboard
             </Link>
             <Link
+              href="/import"
+              className={`text-sm transition-colors ${
+                pathname === "/import"
+                  ? "text-foreground font-medium"
+                  : "text-foreground/60 hover:text-foreground"
+              }`}
+            >
+              Import
+            </Link>
+            <Link
               href="/studio"
               className={`text-sm transition-colors ${
                 pathname === "/studio"
@@ -145,6 +155,17 @@ export default function Navbar({ user }: { user: NavbarUser | null }) {
                 }`}
               >
                 Dashboard
+              </Link>
+              <Link
+                href="/import"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`text-sm transition-colors ${
+                  pathname === "/import"
+                    ? "text-foreground font-medium"
+                    : "text-foreground/60 hover:text-foreground"
+                }`}
+              >
+                Import
               </Link>
               <Link
                 href="/studio"

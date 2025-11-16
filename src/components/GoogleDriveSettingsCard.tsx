@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 
 export default function GoogleDriveSettingsCard({ email }: { email: string }) {
   const searchParams = useSearchParams();
+  const org = useQuery(api.organizations.getOrganizationForUser, { email });
   const cfg = useQuery(api.googleDrive.getConfigForEmail, { email });
   const disconnectAccount = useMutation(api.googleDrive.disconnectAccount);
   const [disconnecting, setDisconnecting] = React.useState(false);
@@ -30,12 +31,19 @@ export default function GoogleDriveSettingsCard({ email }: { email: string }) {
   };
 
   const handleDisconnect = async () => {
-    if (!confirm("Are you sure you want to disconnect your Google Drive account? This will prevent scripts from being uploaded to Drive.")) {
+    const message = org 
+      ? "Are you sure you want to disconnect your organization's Google Drive account? This will prevent scripts from being uploaded to Drive for all organization members."
+      : "Are you sure you want to disconnect your Google Drive account? This will prevent scripts from being uploaded to Drive.";
+    
+    if (!confirm(message)) {
       return;
     }
     setDisconnecting(true);
     try {
-      await disconnectAccount({ email });
+      await disconnectAccount({ 
+        email,
+        organizationId: org?._id,
+      });
     } catch (error) {
       console.error("Failed to disconnect Google Drive:", error);
       alert(error instanceof Error ? error.message : "Failed to disconnect account");
@@ -52,8 +60,13 @@ export default function GoogleDriveSettingsCard({ email }: { email: string }) {
       
       <div className="space-y-2">
         <p className="text-sm text-foreground/70">
-          Connect your Google Drive account to automatically upload generated scripts to Drive.
+          Connect a Google Drive account for your organization. All members of your organization will use the same Google Drive account for script uploads.
         </p>
+        {cfg?.connectedByEmail && cfg.connectedByEmail !== email && (
+          <p className="text-xs text-foreground/60 italic">
+            Connected by: {cfg.connectedByEmail}
+          </p>
+        )}
 
         {showSuccess && (
           <div className="rounded-md border border-green-500/30 bg-green-500/10 p-3">

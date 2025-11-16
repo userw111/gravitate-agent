@@ -136,8 +136,15 @@ export async function GET(request: Request) {
 
     const tokenExpiry = Date.now() + (tokenData.expires_in * 1000);
 
-    await convex.mutation(api.googleDrive.setTokensForEmail, {
+    // Get or create organization for user
+    const organizationId = await convex.mutation(api.organizations.getOrCreateDefaultOrganization, {
       email: user.email,
+    });
+
+    // Store tokens at organization level
+    await convex.mutation(api.googleDrive.setTokensForOrganization, {
+      organizationId,
+      connectedByEmail: user.email,
       accessToken: tokenData.access_token,
       refreshToken: tokenData.refresh_token || "",
       tokenExpiry,

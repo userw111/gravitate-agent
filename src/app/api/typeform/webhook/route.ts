@@ -286,38 +286,90 @@ export async function POST(request: Request) {
               }
               
               // Create/update client if we have business name (businessEmail is optional)
+              // First check for duplicates (manual clients or existing clients)
               if (businessName) {
                 try {
-                  await convex.mutation(api.clients.upsertClientFromTypeform, {
+                  // Extract website from payload if available
+                  const website = extractedData.website || 
+                    (payload.answers?.find((a: any) => 
+                      a.field?.ref?.toLowerCase().includes("website") || 
+                      a.field?.ref?.toLowerCase().includes("url") ||
+                      a.text?.match(/^https?:\/\//)
+                    )?.text || undefined);
+                  
+                  // Check for duplicate client before creating
+                  const duplicate = await convex.query(api.clients.findDuplicateClient, {
                     ownerEmail: userEmail,
                     businessEmail: businessEmail ? businessEmail.toLowerCase().trim() : undefined,
                     businessName: businessName,
-                    contactFirstName: firstName || undefined,
-                    contactLastName: lastName || undefined,
-                    onboardingResponseId: responseId,
-                    targetRevenue: targetRevenue || undefined,
+                    website: website || undefined,
                   });
                   
-                  // Trigger script generation via Cloudflare Workflow (or fallback to direct)
-                  // This happens in the background so webhook responds quickly
-                  console.log(
-                    `[Workflow][Webhook] Triggering script generation workflow`,
-                    JSON.stringify({ responseId, ownerEmail: userEmail, clientCreated: true })
-                  );
-                  const workflowUrl = `${process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api')[0]}/api/workflows/script-generation`;
-                  fetch(workflowUrl, {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
+                  if (duplicate) {
+                    // Link the response to the existing client instead of creating a new one
+                    console.log(`[Webhook] Duplicate client found: ${duplicate.businessName}, linking response ${responseId}`);
+                    await convex.mutation(api.clients.linkResponseToClient, {
+                      clientId: duplicate._id,
                       responseId: responseId,
-                      email: userEmail,
-                    }),
-                  }).catch((error) => {
-                    console.error(`[Workflow][Webhook] Failed to trigger script generation workflow for response ${responseId}:`, error);
-                    // Don't fail the webhook if script generation fails
-                  });
+                    });
+                    // Update client with response data if it's a manual client (no onboardingResponseId)
+                    if (!duplicate.onboardingResponseId) {
+                      await convex.mutation(api.clients.updateClient, {
+                        clientId: duplicate._id,
+                        onboardingResponseId: responseId,
+                        contactFirstName: firstName || undefined,
+                        contactLastName: lastName || undefined,
+                        targetRevenue: targetRevenue || undefined,
+                      });
+                      
+                      // Trigger script generation for manual clients that now have a response
+                      const workflowUrl = `${process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api')[0]}/api/workflows/script-generation`;
+                      fetch(workflowUrl, {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                          responseId: responseId,
+                          email: userEmail,
+                        }),
+                      }).catch((error) => {
+                        console.error(`[Workflow][Webhook] Failed to trigger script generation workflow for duplicate client ${duplicate._id}:`, error);
+                      });
+                    }
+                  } else {
+                    // No duplicate found, create new client
+                    await convex.mutation(api.clients.upsertClientFromTypeform, {
+                      ownerEmail: userEmail,
+                      businessEmail: businessEmail ? businessEmail.toLowerCase().trim() : undefined,
+                      businessName: businessName,
+                      contactFirstName: firstName || undefined,
+                      contactLastName: lastName || undefined,
+                      onboardingResponseId: responseId,
+                      targetRevenue: targetRevenue || undefined,
+                    });
+                    
+                    // Trigger script generation via Cloudflare Workflow (or fallback to direct)
+                    // This happens in the background so webhook responds quickly
+                    console.log(
+                      `[Workflow][Webhook] Triggering script generation workflow`,
+                      JSON.stringify({ responseId, ownerEmail: userEmail, clientCreated: true })
+                    );
+                    const workflowUrl = `${process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api')[0]}/api/workflows/script-generation`;
+                    fetch(workflowUrl, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                      },
+                      body: JSON.stringify({
+                        responseId: responseId,
+                        email: userEmail,
+                      }),
+                    }).catch((error) => {
+                      console.error(`[Workflow][Webhook] Failed to trigger script generation workflow for response ${responseId}:`, error);
+                      // Don't fail the webhook if script generation fails
+                    });
+                  }
                 } catch (clientError) {
                   // Log but don't fail the webhook if client creation fails
                   console.error(`[Workflow][Webhook] Failed to create/update client for ${businessEmail || businessName}:`, clientError);

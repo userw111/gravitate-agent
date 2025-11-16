@@ -158,7 +158,33 @@ export const createRecord = mutation({
 
     switch (args.table) {
       case "clients": {
+        // Get or create organization for owner
+        let member = await ctx.db
+          .query("organization_members")
+          .withIndex("by_email", (q) => q.eq("email", args.ownerEmail))
+          .first();
+        
+        let organizationId: Id<"organizations">;
+        if (member) {
+          organizationId = member.organizationId;
+        } else {
+          // Create default organization for user inline
+          organizationId = await ctx.db.insert("organizations", {
+            name: `${args.ownerEmail.split("@")[0]}'s Organization`,
+            createdAt: now,
+            updatedAt: now,
+          });
+          await ctx.db.insert("organization_members", {
+            organizationId,
+            email: args.ownerEmail,
+            role: "owner",
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+
         const clientId = await ctx.db.insert("clients", {
+          organizationId,
           ownerEmail: args.ownerEmail,
           businessEmail: args.data.businessEmail || undefined,
           businessName: args.data.businessName,
@@ -187,8 +213,43 @@ export const createRecord = mutation({
         return clientId;
       }
 
-      case "fireflies_transcripts":
+      case "fireflies_transcripts": {
+        // Get organizationId from client or ownerEmail
+        let organizationId: Id<"organizations">;
+        if (args.data.clientId) {
+          const client = await ctx.db.get(args.data.clientId as Id<"clients">);
+          if (!client || !client.organizationId) {
+            throw new Error("Client not found or missing organization");
+          }
+          organizationId = client.organizationId;
+        } else {
+          // Get or create organization for ownerEmail
+          let member = await ctx.db
+            .query("organization_members")
+            .withIndex("by_email", (q) => q.eq("email", args.ownerEmail))
+            .first();
+          
+          if (member) {
+            organizationId = member.organizationId;
+          } else {
+            // Create default organization for user inline
+            organizationId = await ctx.db.insert("organizations", {
+              name: `${args.ownerEmail.split("@")[0]}'s Organization`,
+              createdAt: now,
+              updatedAt: now,
+            });
+            await ctx.db.insert("organization_members", {
+              organizationId,
+              email: args.ownerEmail,
+              role: "owner",
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
+        }
+
         return await ctx.db.insert("fireflies_transcripts", {
+          organizationId,
           email: args.ownerEmail,
           transcriptId: args.data.transcriptId,
           meetingId: args.data.meetingId,
@@ -200,6 +261,7 @@ export const createRecord = mutation({
           syncedAt: now,
           clientId: args.data.clientId,
         });
+      }
 
       case "fireflies_webhooks":
         return await ctx.db.insert("fireflies_webhooks", {
