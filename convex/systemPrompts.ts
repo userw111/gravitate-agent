@@ -1,5 +1,6 @@
 import { query, mutation, QueryCtx, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
+import { getOrganizationIdForEmail, getOrCreateOrganizationIdForEmail } from "./utils/organizations";
 
 const DEFAULT_SYSTEM_PROMPT = `You are an expert video script writer creating personalized outreach scripts for businesses.
 
@@ -20,10 +21,22 @@ const HTML_FORMATTING_INSTRUCTION = `\n\nFormat the response as clean HTML witho
 export const getSystemPromptForEditing = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
-    const prompt = await ctx.db
-      .query("system_prompts")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
-      .unique();
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    let prompt = null;
+    if (organizationId) {
+      prompt = await ctx.db
+        .query("system_prompts")
+        .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
+        .unique();
+    }
+
+    if (!prompt) {
+      // Fallback for legacy email-scoped prompts
+      prompt = await ctx.db
+        .query("system_prompts")
+        .withIndex("by_email", (q) => q.eq("email", args.email))
+        .unique();
+    }
 
     const userPrompt = prompt?.prompt || DEFAULT_SYSTEM_PROMPT;
     // Remove HTML formatting instruction if it's already present (for backwards compatibility)
@@ -42,10 +55,21 @@ export const getSystemPromptForEditing = query({
 export const getSystemPrompt = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
-    const prompt = await ctx.db
-      .query("system_prompts")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
-      .unique();
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    let prompt = null;
+    if (organizationId) {
+      prompt = await ctx.db
+        .query("system_prompts")
+        .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
+        .unique();
+    }
+
+    if (!prompt) {
+      prompt = await ctx.db
+        .query("system_prompts")
+        .withIndex("by_email", (q) => q.eq("email", args.email))
+        .unique();
+    }
 
     let userPrompt = prompt?.prompt || DEFAULT_SYSTEM_PROMPT;
     
@@ -77,9 +101,10 @@ export const updateSystemPrompt = mutation({
       cleanedPrompt = cleanedPrompt.replace(new RegExp(`\\s*${formattingInstruction.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'), '').trim();
     }
 
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.email);
     const existing = await ctx.db
       .query("system_prompts")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
       .unique();
 
     const now = Date.now();
@@ -93,6 +118,7 @@ export const updateSystemPrompt = mutation({
     }
 
     return await ctx.db.insert("system_prompts", {
+      organizationId,
       email: args.email,
       prompt: cleanedPrompt,
       createdAt: now,

@@ -1,12 +1,17 @@
 import { mutation, query, QueryCtx, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
+import { getOrganizationIdForEmail, getOrCreateOrganizationIdForEmail } from "./utils/organizations";
 
 export const getConfigForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    if (!organizationId) {
+      return null;
+    }
     return await ctx.db
       .query("typeform_configs")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
       .unique();
   },
 });
@@ -14,9 +19,10 @@ export const getConfigForEmail = query({
 export const setSecretForEmail = mutation({
   args: { email: v.string(), secret: v.string() },
   handler: async (ctx: MutationCtx, args) => {
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.email);
     const existing = await ctx.db
       .query("typeform_configs")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
       .unique();
     const now = Date.now();
     if (existing) {
@@ -24,6 +30,7 @@ export const setSecretForEmail = mutation({
       return existing._id;
     }
     return await ctx.db.insert("typeform_configs", {
+      organizationId,
       email: args.email,
       secret: args.secret,
       createdAt: now,
@@ -35,9 +42,10 @@ export const setSecretForEmail = mutation({
 export const setAccessTokenForEmail = mutation({
   args: { email: v.string(), accessToken: v.string() },
   handler: async (ctx: MutationCtx, args) => {
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.email);
     const existing = await ctx.db
       .query("typeform_configs")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
       .unique();
     const now = Date.now();
     if (existing) {
@@ -46,6 +54,7 @@ export const setAccessTokenForEmail = mutation({
     }
     // If config doesn't exist, create it with just the access token
     return await ctx.db.insert("typeform_configs", {
+      organizationId,
       email: args.email,
       accessToken: args.accessToken,
       createdAt: now,
@@ -62,10 +71,11 @@ export const storeWebhook = mutation({
     formId: v.optional(v.string()),
   },
   handler: async (ctx: MutationCtx, args) => {
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.email);
     // Check for duplicate payloads by comparing with existing webhooks for this email
     const existingWebhooks = await ctx.db
       .query("typeform_webhooks")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
       .collect();
     
     // Stringify the new payload for comparison
@@ -82,6 +92,7 @@ export const storeWebhook = mutation({
     
     // No duplicate found, insert new webhook
     return await ctx.db.insert("typeform_webhooks", {
+      organizationId,
       email: args.email,
       payload: args.payload,
       eventType: args.eventType,
@@ -94,9 +105,13 @@ export const storeWebhook = mutation({
 export const getLatestWebhookForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    if (!organizationId) {
+      return null;
+    }
     const webhooks = await ctx.db
       .query("typeform_webhooks")
-      .withIndex("by_email_received", (q) => q.eq("email", args.email))
+      .withIndex("by_organization_received", (q) => q.eq("organizationId", organizationId))
       .order("desc")
       .take(1);
     return webhooks[0] ?? null;
@@ -106,9 +121,13 @@ export const getLatestWebhookForEmail = query({
 export const getLatestSyncedResponseForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    if (!organizationId) {
+      return null;
+    }
     const responses = await ctx.db
       .query("typeform_responses")
-      .withIndex("by_email_synced", (q) => q.eq("email", args.email))
+      .withIndex("by_organization_synced", (q) => q.eq("organizationId", organizationId))
       .order("desc")
       .take(1);
     return responses[0] ?? null;
@@ -118,10 +137,14 @@ export const getLatestSyncedResponseForEmail = query({
 export const getLatestActivityForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    if (!organizationId) {
+      return null;
+    }
     // Get latest webhook
     const webhooks = await ctx.db
       .query("typeform_webhooks")
-      .withIndex("by_email_received", (q) => q.eq("email", args.email))
+      .withIndex("by_organization_received", (q) => q.eq("organizationId", organizationId))
       .order("desc")
       .take(1);
     const latestWebhook = webhooks[0] ?? null;
@@ -129,7 +152,7 @@ export const getLatestActivityForEmail = query({
     // Get latest synced response
     const responses = await ctx.db
       .query("typeform_responses")
-      .withIndex("by_email_synced", (q) => q.eq("email", args.email))
+      .withIndex("by_organization_synced", (q) => q.eq("organizationId", organizationId))
       .order("desc")
       .take(1);
     const latestResponse = responses[0] ?? null;
@@ -207,7 +230,9 @@ export const storeResponse = mutation({
     }))),
   },
   handler: async (ctx: MutationCtx, args) => {
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.email);
     return await ctx.db.insert("typeform_responses", {
+      organizationId,
       email: args.email,
       formId: args.formId,
       responseId: args.responseId,
@@ -260,9 +285,13 @@ export const updateResponseWithQuestions = mutation({
 export const getAllResponsesForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    if (!organizationId) {
+      return [];
+    }
     const responses = await ctx.db
       .query("typeform_responses")
-      .withIndex("by_email_synced", (q) => q.eq("email", args.email))
+      .withIndex("by_organization_synced", (q) => q.eq("organizationId", organizationId))
       .order("desc")
       .collect();
     return responses;
@@ -275,6 +304,10 @@ export const getAllResponsesForEmail = query({
 export const getUnlinkedResponsesCountForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    if (!organizationId) {
+      return 0;
+    }
     const timestamp = new Date().toISOString();
     console.log(
       "[TYPEFORM] getUnlinkedResponsesCountForEmail called",
@@ -292,13 +325,13 @@ export const getUnlinkedResponsesCountForEmail = query({
       // Get all responses
       const allResponses = await ctx.db
         .query("typeform_responses")
-        .withIndex("by_email_synced", (q) => q.eq("email", args.email))
+        .withIndex("by_organization_synced", (q) => q.eq("organizationId", organizationId))
         .collect();
 
       // Get all clients
       const allClients = await ctx.db
         .query("clients")
-        .withIndex("by_owner", (q) => q.eq("ownerEmail", args.email))
+        .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
         .collect();
 
       // Create a set of responseIds that have clients
@@ -358,17 +391,21 @@ export const getUnlinkedResponsesCountForEmail = query({
 export const getUnlinkedResponsesForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    if (!organizationId) {
+      return [];
+    }
     // Get all responses
     const allResponses = await ctx.db
       .query("typeform_responses")
-      .withIndex("by_email_synced", (q) => q.eq("email", args.email))
+      .withIndex("by_organization_synced", (q) => q.eq("organizationId", organizationId))
       .order("desc")
       .collect();
     
     // Get all clients
     const allClients = await ctx.db
       .query("clients")
-      .withIndex("by_owner", (q) => q.eq("ownerEmail", args.email))
+      .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
       .collect();
     
     // Create a set of responseIds that have clients

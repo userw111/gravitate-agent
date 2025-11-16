@@ -28,6 +28,9 @@ function getInitialsFromEmail(email: string): string {
 export default function Navbar({ user }: { user: NavbarUser | null }) {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+  const handleSignOut = React.useCallback(() => {
+    window.location.href = "/api/auth/sign-out";
+  }, []);
   const unlinkedCount = useQuery(
     api.typeform.getUnlinkedResponsesCountForEmail,
     user ? { email: user.email } : "skip"
@@ -137,6 +140,7 @@ export default function Navbar({ user }: { user: NavbarUser | null }) {
             }
             items={[
               { label: "Settings", href: "/settings" },
+              { label: "Sign out", onClick: handleSignOut, danger: true },
             ]}
           />
         </div>

@@ -2,6 +2,7 @@ import { mutation, query, QueryCtx, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { api } from "./_generated/api";
+import { getOrganizationIdForEmail, getOrCreateOrganizationIdForEmail } from "./utils/organizations";
 
 // Tables that are allowed for database operations
 const ALLOWED_TABLES = [
@@ -43,19 +44,26 @@ export const readTable = query({
     validateTable(args.table);
     const limit = Math.min(args.limit ?? 100, 200);
     const includeTranscript = args.includeTranscript !== false; // Default to true
+    const organizationId = await getOrganizationIdForEmail(ctx, args.ownerEmail);
 
     switch (args.table) {
       case "clients":
+        if (!organizationId) {
+          return [];
+        }
         return await ctx.db
           .query("clients")
-          .withIndex("by_owner", (q) => q.eq("ownerEmail", args.ownerEmail))
+          .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
           .order("desc")
           .take(limit);
 
       case "fireflies_transcripts":
+        if (!organizationId) {
+          return [];
+        }
         const transcripts = await ctx.db
           .query("fireflies_transcripts")
-          .withIndex("by_email_synced", (q) => q.eq("email", args.ownerEmail))
+          .withIndex("by_organization_synced", (q) => q.eq("organizationId", organizationId))
           .order("desc")
           .collect();
         
@@ -91,16 +99,22 @@ export const readTable = query({
         return limited;
 
       case "fireflies_webhooks":
+        if (!organizationId) {
+          return [];
+        }
         return await ctx.db
           .query("fireflies_webhooks")
-          .withIndex("by_email_received", (q) => q.eq("email", args.ownerEmail))
+          .withIndex("by_organization_received", (q) => q.eq("organizationId", organizationId))
           .order("desc")
           .take(limit);
 
       case "typeform_responses":
+        if (!organizationId) {
+          return [];
+        }
         const responses = await ctx.db
           .query("typeform_responses")
-          .withIndex("by_email_synced", (q) => q.eq("email", args.ownerEmail))
+          .withIndex("by_organization_synced", (q) => q.eq("organizationId", organizationId))
           .order("desc")
           .collect();
         
@@ -110,7 +124,7 @@ export const readTable = query({
           // Get all clients to find linked responseIds
           const clients = await ctx.db
             .query("clients")
-            .withIndex("by_owner", (q) => q.eq("ownerEmail", args.ownerEmail))
+            .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
             .collect();
           const linkedResponseIds = new Set(
             clients
@@ -125,9 +139,12 @@ export const readTable = query({
         return filteredResponses.slice(0, limit);
 
       case "typeform_webhooks":
+        if (!organizationId) {
+          return [];
+        }
         return await ctx.db
           .query("typeform_webhooks")
-          .withIndex("by_email_received", (q) => q.eq("email", args.ownerEmail))
+          .withIndex("by_organization_received", (q) => q.eq("organizationId", organizationId))
           .order("desc")
           .take(limit);
 
@@ -155,36 +172,12 @@ export const createRecord = mutation({
   handler: async (ctx: MutationCtx, args) => {
     validateTable(args.table);
     const now = Date.now();
+    const ownerOrganizationId = await getOrCreateOrganizationIdForEmail(ctx, args.ownerEmail);
 
     switch (args.table) {
       case "clients": {
-        // Get or create organization for owner
-        let member = await ctx.db
-          .query("organization_members")
-          .withIndex("by_email", (q) => q.eq("email", args.ownerEmail))
-          .first();
-        
-        let organizationId: Id<"organizations">;
-        if (member) {
-          organizationId = member.organizationId;
-        } else {
-          // Create default organization for user inline
-          organizationId = await ctx.db.insert("organizations", {
-            name: `${args.ownerEmail.split("@")[0]}'s Organization`,
-            createdAt: now,
-            updatedAt: now,
-          });
-          await ctx.db.insert("organization_members", {
-            organizationId,
-            email: args.ownerEmail,
-            role: "owner",
-            createdAt: now,
-            updatedAt: now,
-          });
-        }
-
         const clientId = await ctx.db.insert("clients", {
-          organizationId,
+          organizationId: ownerOrganizationId,
           ownerEmail: args.ownerEmail,
           businessEmail: args.data.businessEmail || undefined,
           businessName: args.data.businessName,
@@ -215,37 +208,16 @@ export const createRecord = mutation({
 
       case "fireflies_transcripts": {
         // Get organizationId from client or ownerEmail
-        let organizationId: Id<"organizations">;
+        let organizationId: Id<"organizations"> = ownerOrganizationId;
         if (args.data.clientId) {
           const client = await ctx.db.get(args.data.clientId as Id<"clients">);
           if (!client || !client.organizationId) {
             throw new Error("Client not found or missing organization");
           }
-          organizationId = client.organizationId;
-        } else {
-          // Get or create organization for ownerEmail
-          let member = await ctx.db
-            .query("organization_members")
-            .withIndex("by_email", (q) => q.eq("email", args.ownerEmail))
-            .first();
-          
-          if (member) {
-            organizationId = member.organizationId;
-          } else {
-            // Create default organization for user inline
-            organizationId = await ctx.db.insert("organizations", {
-              name: `${args.ownerEmail.split("@")[0]}'s Organization`,
-              createdAt: now,
-              updatedAt: now,
-            });
-            await ctx.db.insert("organization_members", {
-              organizationId,
-              email: args.ownerEmail,
-              role: "owner",
-              createdAt: now,
-              updatedAt: now,
-            });
+          if (client.organizationId !== ownerOrganizationId) {
+            throw new Error("Client belongs to a different organization");
           }
+          organizationId = client.organizationId;
         }
 
         return await ctx.db.insert("fireflies_transcripts", {
@@ -265,6 +237,7 @@ export const createRecord = mutation({
 
       case "fireflies_webhooks":
         return await ctx.db.insert("fireflies_webhooks", {
+          organizationId: ownerOrganizationId,
           email: args.ownerEmail,
           payload: args.data.payload,
           eventType: args.data.eventType,
@@ -275,6 +248,7 @@ export const createRecord = mutation({
 
       case "typeform_responses":
         return await ctx.db.insert("typeform_responses", {
+          organizationId: ownerOrganizationId,
           email: args.ownerEmail,
           formId: args.data.formId,
           responseId: args.data.responseId,
@@ -286,6 +260,7 @@ export const createRecord = mutation({
 
       case "typeform_webhooks":
         return await ctx.db.insert("typeform_webhooks", {
+          organizationId: ownerOrganizationId,
           email: args.ownerEmail,
           payload: args.data.payload,
           eventType: args.data.eventType,
@@ -318,13 +293,14 @@ export const updateRecord = mutation({
   handler: async (ctx: MutationCtx, args) => {
     validateTable(args.table);
     const now = Date.now();
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.ownerEmail);
 
     // Verify ownership for tables that require it
     switch (args.table) {
       case "clients": {
         const recordId = args.id as Id<"clients">;
         const record = await ctx.db.get(recordId);
-        if (!record || record.ownerEmail !== args.ownerEmail) {
+        if (!record || record.organizationId !== organizationId) {
           throw new Error("Client not found or access denied");
         }
         await ctx.db.patch(recordId, {
@@ -337,7 +313,7 @@ export const updateRecord = mutation({
       case "fireflies_transcripts": {
         const recordId = args.id as Id<"fireflies_transcripts">;
         const transcript = await ctx.db.get(recordId);
-        if (!transcript || transcript.email !== args.ownerEmail) {
+        if (!transcript || transcript.organizationId !== organizationId) {
           throw new Error("Transcript not found or access denied");
         }
         await ctx.db.patch(recordId, {
@@ -350,7 +326,7 @@ export const updateRecord = mutation({
       case "fireflies_webhooks": {
         const recordId = args.id as Id<"fireflies_webhooks">;
         const webhook = await ctx.db.get(recordId);
-        if (!webhook || webhook.email !== args.ownerEmail) {
+        if (!webhook || webhook.organizationId !== organizationId) {
           throw new Error("Webhook not found or access denied");
         }
         await ctx.db.patch(recordId, args.data);
@@ -360,7 +336,7 @@ export const updateRecord = mutation({
       case "typeform_responses": {
         const recordId = args.id as Id<"typeform_responses">;
         const response = await ctx.db.get(recordId);
-        if (!response || response.email !== args.ownerEmail) {
+        if (!response || response.organizationId !== organizationId) {
           throw new Error("Response not found or access denied");
         }
         await ctx.db.patch(recordId, args.data);
@@ -370,7 +346,7 @@ export const updateRecord = mutation({
       case "typeform_webhooks": {
         const recordId = args.id as Id<"typeform_webhooks">;
         const tfWebhook = await ctx.db.get(recordId);
-        if (!tfWebhook || tfWebhook.email !== args.ownerEmail) {
+        if (!tfWebhook || tfWebhook.organizationId !== organizationId) {
           throw new Error("Webhook not found or access denied");
         }
         await ctx.db.patch(recordId, args.data);
@@ -404,13 +380,14 @@ export const deleteRecord = mutation({
   },
   handler: async (ctx: MutationCtx, args) => {
     validateTable(args.table);
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.ownerEmail);
 
     // Verify ownership before deletion
     switch (args.table) {
       case "clients": {
         const recordId = args.id as Id<"clients">;
         const record = await ctx.db.get(recordId);
-        if (!record || record.ownerEmail !== args.ownerEmail) {
+        if (!record || record.organizationId !== organizationId) {
           throw new Error("Client not found or access denied");
         }
         await ctx.db.delete(recordId);
@@ -420,7 +397,7 @@ export const deleteRecord = mutation({
       case "fireflies_transcripts": {
         const recordId = args.id as Id<"fireflies_transcripts">;
         const record = await ctx.db.get(recordId);
-        if (!record || record.email !== args.ownerEmail) {
+        if (!record || record.organizationId !== organizationId) {
           throw new Error("Transcript not found or access denied");
         }
         await ctx.db.delete(recordId);
@@ -430,7 +407,7 @@ export const deleteRecord = mutation({
       case "fireflies_webhooks": {
         const recordId = args.id as Id<"fireflies_webhooks">;
         const record = await ctx.db.get(recordId);
-        if (!record || record.email !== args.ownerEmail) {
+        if (!record || record.organizationId !== organizationId) {
           throw new Error("Webhook not found or access denied");
         }
         await ctx.db.delete(recordId);
@@ -440,7 +417,7 @@ export const deleteRecord = mutation({
       case "typeform_responses": {
         const recordId = args.id as Id<"typeform_responses">;
         const record = await ctx.db.get(recordId);
-        if (!record || record.email !== args.ownerEmail) {
+        if (!record || record.organizationId !== organizationId) {
           throw new Error("Response not found or access denied");
         }
         await ctx.db.delete(recordId);
@@ -450,7 +427,7 @@ export const deleteRecord = mutation({
       case "typeform_webhooks": {
         const recordId = args.id as Id<"typeform_webhooks">;
         const record = await ctx.db.get(recordId);
-        if (!record || record.email !== args.ownerEmail) {
+        if (!record || record.organizationId !== organizationId) {
           throw new Error("Webhook not found or access denied");
         }
         await ctx.db.delete(recordId);
@@ -483,9 +460,10 @@ export const linkTranscriptToClient = mutation({
     ownerEmail: v.string(),
   },
   handler: async (ctx: MutationCtx, args) => {
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.ownerEmail);
     // Verify ownership
     const client = await ctx.db.get(args.clientId);
-    if (!client || client.ownerEmail !== args.ownerEmail) {
+    if (!client || client.organizationId !== organizationId) {
       throw new Error("Client not found or access denied");
     }
 
@@ -494,7 +472,7 @@ export const linkTranscriptToClient = mutation({
       .withIndex("by_transcript_id", (q) => q.eq("transcriptId", args.transcriptId))
       .first();
 
-    if (!transcript || transcript.email !== args.ownerEmail) {
+    if (!transcript || transcript.organizationId !== organizationId) {
       throw new Error("Transcript not found or access denied");
     }
 
@@ -516,9 +494,10 @@ export const linkResponseToClient = mutation({
     ownerEmail: v.string(),
   },
   handler: async (ctx: MutationCtx, args) => {
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.ownerEmail);
     // Verify ownership
     const client = await ctx.db.get(args.clientId);
-    if (!client || client.ownerEmail !== args.ownerEmail) {
+    if (!client || client.organizationId !== organizationId) {
       throw new Error("Client not found or access denied");
     }
 
@@ -527,7 +506,7 @@ export const linkResponseToClient = mutation({
       .withIndex("by_response_id", (q) => q.eq("responseId", args.responseId))
       .first();
 
-    if (!response || response.email !== args.ownerEmail) {
+    if (!response || response.organizationId !== organizationId) {
       throw new Error("Response not found or access denied");
     }
 

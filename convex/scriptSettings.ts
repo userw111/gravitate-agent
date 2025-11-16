@@ -1,6 +1,6 @@
 import { mutation, query, QueryCtx, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import { getOrganizationIdForEmail, getOrCreateOrganizationIdForEmail } from "./utils/organizations";
 
 /**
  * Get script generation settings for a user
@@ -8,10 +8,26 @@ import type { Id } from "./_generated/dataModel";
 export const getSettingsForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
-    return await ctx.db
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    if (!organizationId) {
+      return await ctx.db
+        .query("script_settings")
+        .withIndex("by_email", (q) => q.eq("email", args.email))
+        .unique();
+    }
+    let settings = await ctx.db
       .query("script_settings")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
       .unique();
+
+    if (!settings) {
+      settings = await ctx.db
+        .query("script_settings")
+        .withIndex("by_email", (q) => q.eq("email", args.email))
+        .unique();
+    }
+
+    return settings;
   },
 });
 
@@ -28,35 +44,10 @@ export const updateSettings = mutation({
     cronJobTemplate: v.optional(v.array(v.number())), // e.g., [15] for 15th of every month, [5, 20] for 5th and 20th
   },
   handler: async (ctx: MutationCtx, args) => {
-    // Get or create organization for email
-    let member = await ctx.db
-      .query("organization_members")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
-      .first();
-    
-    let organizationId: Id<"organizations">;
-    if (member) {
-      organizationId = member.organizationId;
-    } else {
-      // Create default organization for user inline
-      const orgNow = Date.now();
-      organizationId = await ctx.db.insert("organizations", {
-        name: `${args.email.split("@")[0]}'s Organization`,
-        createdAt: orgNow,
-        updatedAt: orgNow,
-      });
-      await ctx.db.insert("organization_members", {
-        organizationId,
-        email: args.email,
-        role: "owner",
-        createdAt: orgNow,
-        updatedAt: orgNow,
-      });
-    }
-    
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.email);
     const existing = await ctx.db
       .query("script_settings")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
       .unique();
     
     const now = Date.now();

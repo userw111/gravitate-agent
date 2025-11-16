@@ -2,6 +2,7 @@ import { mutation, query, QueryCtx, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { getOrganizationIdForEmail, getOrCreateOrganizationIdForEmail } from "./utils/organizations";
 
 type LinkingHistoryEntry = {
   stage: string;
@@ -15,9 +16,13 @@ type LinkingHistoryEntry = {
 export const getConfigForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    if (!organizationId) {
+      return null;
+    }
     return await ctx.db
       .query("fireflies_configs")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
       .unique();
   },
 });
@@ -25,9 +30,10 @@ export const getConfigForEmail = query({
 export const setApiKeyForEmail = mutation({
   args: { email: v.string(), apiKey: v.string() },
   handler: async (ctx: MutationCtx, args) => {
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.email);
     const existing = await ctx.db
       .query("fireflies_configs")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
       .unique();
     const now = Date.now();
     if (existing) {
@@ -35,6 +41,7 @@ export const setApiKeyForEmail = mutation({
       return existing._id;
     }
     return await ctx.db.insert("fireflies_configs", {
+      organizationId,
       email: args.email,
       apiKey: args.apiKey,
       createdAt: now,
@@ -46,9 +53,10 @@ export const setApiKeyForEmail = mutation({
 export const setWebhookSecretForEmail = mutation({
   args: { email: v.string(), webhookSecret: v.string() },
   handler: async (ctx: MutationCtx, args) => {
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.email);
     const existing = await ctx.db
       .query("fireflies_configs")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
       .unique();
     const now = Date.now();
     if (existing) {
@@ -56,6 +64,7 @@ export const setWebhookSecretForEmail = mutation({
       return existing._id;
     }
     return await ctx.db.insert("fireflies_configs", {
+      organizationId,
       email: args.email,
       webhookSecret: args.webhookSecret,
       createdAt: now,
@@ -73,7 +82,9 @@ export const storeWebhook = mutation({
     transcriptId: v.optional(v.string()),
   },
   handler: async (ctx: MutationCtx, args) => {
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.email);
     return await ctx.db.insert("fireflies_webhooks", {
+      organizationId,
       email: args.email,
       payload: args.payload,
       eventType: args.eventType,
@@ -87,9 +98,13 @@ export const storeWebhook = mutation({
 export const getLatestWebhookForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    if (!organizationId) {
+      return null;
+    }
     const webhooks = await ctx.db
       .query("fireflies_webhooks")
-      .withIndex("by_email_received", (q) => q.eq("email", args.email))
+      .withIndex("by_organization_received", (q) => q.eq("organizationId", organizationId))
       .order("desc")
       .take(1);
     return webhooks[0] ?? null;
@@ -99,9 +114,13 @@ export const getLatestWebhookForEmail = query({
 export const getAllTranscriptsForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    if (!organizationId) {
+      return [];
+    }
     const transcripts = await ctx.db
       .query("fireflies_transcripts")
-      .withIndex("by_email_synced", (q) => q.eq("email", args.email))
+      .withIndex("by_organization_synced", (q) => q.eq("organizationId", organizationId))
       .order("desc")
       .collect();
     return transcripts;
@@ -114,10 +133,14 @@ export const getAllTranscriptsForEmail = query({
 export const getUnlinkedTranscriptsForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
+    const organizationId = await getOrganizationIdForEmail(ctx, args.email);
+    if (!organizationId) {
+      return [];
+    }
     // Get all transcripts for this owner
     const allTranscripts = await ctx.db
       .query("fireflies_transcripts")
-      .withIndex("by_email_synced", (q) => q.eq("email", args.email))
+      .withIndex("by_organization_synced", (q) => q.eq("organizationId", organizationId))
       .order("desc")
       .collect();
     
@@ -258,30 +281,7 @@ export const storeTranscript = mutation({
       }
       organizationId = client.organizationId;
     } else {
-      // Get or create organization for email
-      let member = await ctx.db
-        .query("organization_members")
-        .withIndex("by_email", (q) => q.eq("email", args.email))
-        .first();
-      
-      if (member) {
-        organizationId = member.organizationId;
-      } else {
-        // Create default organization for user inline
-        const now = Date.now();
-        organizationId = await ctx.db.insert("organizations", {
-          name: `${args.email.split("@")[0]}'s Organization`,
-          createdAt: now,
-          updatedAt: now,
-        });
-        await ctx.db.insert("organization_members", {
-          organizationId,
-          email: args.email,
-          role: "owner",
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
+      organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.email);
     }
 
     // Insert new transcript
