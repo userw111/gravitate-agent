@@ -90,7 +90,7 @@ export function DropdownMenu({ trigger, items }: DropdownMenuProps) {
                 <button
                   type="button"
                   onClick={() => {
-                    item.onClick();
+                    item.onClick?.();
                     setOpen(false);
                   }}
                   className={`w-full text-left px-3 py-2 text-sm ${

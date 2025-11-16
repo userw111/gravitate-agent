@@ -289,6 +289,11 @@ export async function POST(request: Request) {
 
     await sendTelegramMessage(chatId, "🔍 Searching for matching client...");
 
+    if (!transcript.email) {
+      await sendTelegramMessage(chatId, "❌ This transcript doesn't have an associated email. Cannot match clients.");
+      return NextResponse.json({ ok: true });
+    }
+
     const clients = await getClientsForOwner(convex, transcript.email);
     if (!clients || clients.length === 0) {
       await sendTelegramMessage(chatId, "❌ I couldn't find any clients to match against. Please add the client first.");

@@ -48,7 +48,7 @@ export function AdBriefingForm({ ownerEmail, clientId }: AdBriefingFormProps) {
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
+        const data = (await res.json().catch(() => null)) as { detail?: string; error?: string } | null;
         const detail = data?.detail || data?.error || res.statusText;
         throw new Error(detail);
       }

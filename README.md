@@ -57,6 +57,7 @@ WORKOS_CLIENT_ID=client_your_client_id_here
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 NODE_ENV=development
 OPENROUTER_API_KEY=sk-or-v1-your_openrouter_key_here
+CONVEX_DEPLOYMENT_TOKEN=your_convex_deployment_token
 ```
 
 **Note:** AI linking and Telegram notifications run in Next.js API routes. 
