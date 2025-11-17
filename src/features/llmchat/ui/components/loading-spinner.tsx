@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+import { motion, type Transition } from 'framer-motion';
 
 const LoadingDot = {
     display: 'block',
@@ -39,7 +39,7 @@ const DotVariants = {
     },
 };
 
-const DotTransition = {
+const DotTransition: Transition = {
     duration: 1.5,
     repeat: Infinity,
     ease: 'easeInOut',

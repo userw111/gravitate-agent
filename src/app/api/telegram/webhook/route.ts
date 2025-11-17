@@ -289,7 +289,16 @@ export async function POST(request: Request) {
 
     await sendTelegramMessage(chatId, "🔍 Searching for matching client...");
 
-    const clients = await getClientsForOwner(convex, transcript.email);
+    const ownerEmail = transcript.email;
+    if (!ownerEmail) {
+      await sendTelegramMessage(
+        chatId,
+        "⚠️ I couldn't determine which account owns this transcript. Please link it manually from the dashboard."
+      );
+      return NextResponse.json({ ok: true });
+    }
+
+    const clients = await getClientsForOwner(convex, ownerEmail);
     if (!clients || clients.length === 0) {
       await sendTelegramMessage(chatId, "❌ I couldn't find any clients to match against. Please add the client first.");
       return NextResponse.json({ ok: true });

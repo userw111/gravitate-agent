@@ -3,6 +3,34 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../convex/_generated/api";
 import crypto from "crypto";
 
+type TypeformAnswer = {
+  field?: {
+    id?: string;
+    ref?: string;
+    type?: string;
+  };
+  text?: string;
+  email?: string;
+  type?: string;
+};
+
+type TypeformFormResponse = {
+  form_id?: string;
+  token?: string;
+  response_id?: string;
+  answers?: TypeformAnswer[];
+  hidden?: Record<string, string>;
+  submitted_at?: string;
+  landed_at?: string;
+};
+
+type TypeformWebhookPayload = {
+  event_id?: string;
+  event_type?: string;
+  form_response?: TypeformFormResponse;
+  form_id?: string;
+};
+
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
 const convex = convexUrl ? new ConvexHttpClient(convexUrl) : null;
 
@@ -113,9 +141,9 @@ export async function POST(request: Request) {
     }
 
     // Parse JSON payload
-    let payload: unknown;
+    let payload: TypeformWebhookPayload;
     try {
-      payload = JSON.parse(rawBody);
+      payload = JSON.parse(rawBody) as TypeformWebhookPayload;
     } catch (parseError) {
       console.error("Failed to parse webhook payload as JSON:", parseError);
       return NextResponse.json(
@@ -125,13 +153,9 @@ export async function POST(request: Request) {
     }
 
     // Extract event type and form ID from payload
-    const payloadObj = payload as Record<string, unknown>;
-    const eventType = typeof payloadObj.event_id === "string" ? payloadObj.event_id : 
-                      typeof payloadObj.event_type === "string" ? payloadObj.event_type : 
-                      undefined;
-    const formId = typeof payloadObj.form_response === "object" && payloadObj.form_response !== null
-      ? (payloadObj.form_response as Record<string, unknown>).form_id as string | undefined
-      : typeof payloadObj.form_id === "string" ? payloadObj.form_id : undefined;
+    const payloadObj = payload;
+    const eventType = payloadObj.event_id ?? payloadObj.event_type ?? undefined;
+    const formId = payloadObj.form_response?.form_id ?? payloadObj.form_id;
 
     // Store webhook in Convex
     try {
@@ -143,7 +167,7 @@ export async function POST(request: Request) {
       });
       
       // If this is a form response webhook, also store the response and create/update client
-      const formResponse = payloadObj.form_response as Record<string, unknown> | undefined;
+      const formResponse = payloadObj.form_response;
       
       if (formResponse && formId) {
         const responseId = typeof formResponse.token === "string" 
@@ -153,6 +177,9 @@ export async function POST(request: Request) {
           : undefined;
         
         if (responseId) {
+          const formAnswers: TypeformAnswer[] = Array.isArray(formResponse.answers)
+            ? formResponse.answers
+            : [];
           // Store response if not already stored
           try {
             const existingResponse = await convex.query(api.typeform.getResponseByResponseId, {
@@ -180,16 +207,17 @@ export async function POST(request: Request) {
                   });
                   
                   // Create Q&A pairs
-                  const answers = formResponse.answers as Array<{ field?: { id?: string; ref?: string }; text?: string }> | undefined;
-                  qaPairs = answers?.map((answer) => {
-                    const ref = answer.field?.ref;
-                    const field = ref ? fieldMap.get(ref) : null;
-                    return {
-                      question: field?.title || ref || "Unknown Question",
-                      answer: answer.text || "",
-                      fieldRef: ref,
-                    };
-                  }) || [];
+                  qaPairs = formAnswers.length > 0
+                    ? formAnswers.map((answer) => {
+                        const ref = answer.field?.ref;
+                        const field = ref ? fieldMap.get(ref) : null;
+                        return {
+                          question: field?.title || ref || "Unknown Question",
+                          answer: answer.text || "",
+                          fieldRef: ref,
+                        };
+                      })
+                    : [];
                 }
               } catch (error) {
                 console.error(`Failed to fetch form details for webhook:`, error);
@@ -286,38 +314,92 @@ export async function POST(request: Request) {
               }
               
               // Create/update client if we have business name (businessEmail is optional)
+              // First check for duplicates (manual clients or existing clients)
               if (businessName) {
                 try {
-                  await convex.mutation(api.clients.upsertClientFromTypeform, {
+                  // Extract website from hidden fields or answers if available
+                  const hiddenFields = (formResponse.hidden ?? {}) as Record<string, unknown>;
+                  const hiddenWebsite = typeof hiddenFields.website === "string" ? hiddenFields.website : undefined;
+                  const websiteAnswer = formAnswers.find((answer) => {
+                    const ref = answer.field?.ref?.toLowerCase() ?? "";
+                    const text = answer.text?.trim();
+                    return ref.includes("website") || ref.includes("url") || (text ? /^https?:\/\//i.test(text) : false);
+                  });
+                  const website = (hiddenWebsite ?? websiteAnswer?.text)?.trim() || undefined;
+                  
+                  // Check for duplicate client before creating
+                  const duplicate = await convex.query(api.clients.findDuplicateClient, {
                     ownerEmail: userEmail,
                     businessEmail: businessEmail ? businessEmail.toLowerCase().trim() : undefined,
                     businessName: businessName,
-                    contactFirstName: firstName || undefined,
-                    contactLastName: lastName || undefined,
-                    onboardingResponseId: responseId,
-                    targetRevenue: targetRevenue || undefined,
+                    website: website || undefined,
                   });
                   
-                  // Trigger script generation via Cloudflare Workflow (or fallback to direct)
-                  // This happens in the background so webhook responds quickly
-                  console.log(
-                    `[Workflow][Webhook] Triggering script generation workflow`,
-                    JSON.stringify({ responseId, ownerEmail: userEmail, clientCreated: true })
-                  );
-                  const workflowUrl = `${process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api')[0]}/api/workflows/script-generation`;
-                  fetch(workflowUrl, {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
+                  if (duplicate) {
+                    // Link the response to the existing client instead of creating a new one
+                    console.log(`[Webhook] Duplicate client found: ${duplicate.businessName}, linking response ${responseId}`);
+                    await convex.mutation(api.clients.linkResponseToClient, {
+                      clientId: duplicate._id,
                       responseId: responseId,
-                      email: userEmail,
-                    }),
-                  }).catch((error) => {
-                    console.error(`[Workflow][Webhook] Failed to trigger script generation workflow for response ${responseId}:`, error);
-                    // Don't fail the webhook if script generation fails
-                  });
+                    });
+                    // Update client with response data if it's a manual client (no onboardingResponseId)
+                    if (!duplicate.onboardingResponseId) {
+                      await convex.mutation(api.clients.updateClient, {
+                        clientId: duplicate._id,
+                        onboardingResponseId: responseId,
+                        contactFirstName: firstName || undefined,
+                        contactLastName: lastName || undefined,
+                        targetRevenue: targetRevenue || undefined,
+                      });
+                      
+                      // Trigger script generation for manual clients that now have a response
+                      const workflowUrl = `${process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api')[0]}/api/workflows/script-generation`;
+                      fetch(workflowUrl, {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                          responseId: responseId,
+                          email: userEmail,
+                        }),
+                      }).catch((error) => {
+                        console.error(`[Workflow][Webhook] Failed to trigger script generation workflow for duplicate client ${duplicate._id}:`, error);
+                      });
+                    }
+                  } else {
+                    // No duplicate found, create new client
+                    await convex.mutation(api.clients.upsertClientFromTypeform, {
+                      ownerEmail: userEmail,
+                      businessEmail: businessEmail ? businessEmail.toLowerCase().trim() : undefined,
+                      businessName: businessName,
+                      contactFirstName: firstName || undefined,
+                      contactLastName: lastName || undefined,
+                      onboardingResponseId: responseId,
+                      targetRevenue: targetRevenue || undefined,
+                    });
+                    
+                    // Trigger script generation via Cloudflare Workflow (or fallback to direct)
+                    // This happens in the background so webhook responds quickly
+                    console.log(
+                      `[Workflow][Webhook] Triggering script generation workflow`,
+                      JSON.stringify({ responseId, ownerEmail: userEmail, clientCreated: true })
+                    );
+                    const workflowUrl = `${process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api')[0]}/api/workflows/script-generation`;
+                    fetch(workflowUrl, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                      },
+                      body: JSON.stringify({
+                        responseId: responseId,
+                        email: userEmail,
+                      }),
+                    }).catch((error) => {
+                      console.error(`[Workflow][Webhook] Failed to trigger script generation workflow for response ${responseId}:`, error);
+                      // Don't fail the webhook if script generation fails
+                    });
+                  }
                 } catch (clientError) {
                   // Log but don't fail the webhook if client creation fails
                   console.error(`[Workflow][Webhook] Failed to create/update client for ${businessEmail || businessName}:`, clientError);

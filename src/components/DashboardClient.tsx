@@ -1,10 +1,13 @@
 "use client";
 
-import { useQuery } from "convex/react";
+import { useQuery, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import ClientTile from "./ClientTile";
 import ClientsTable from "./ClientsTable";
 import { SegmentedControl } from "./ui/segmented-control";
+import CreateManualClientDialog from "./CreateManualClientDialog";
+import { Button } from "./ui/button";
+import { ArrowUpDown } from "lucide-react";
 import * as React from "react";
 
 type DashboardClientProps = {
@@ -19,9 +22,21 @@ export default function DashboardClient({ email }: DashboardClientProps) {
   const [filter, setFilter] = React.useState<ClientStatus>("all");
   const [viewMode, setViewMode] = React.useState<ViewMode>("grid");
   const [searchQuery, setSearchQuery] = React.useState("");
-  const clients = useQuery(api.clients.getAllClientsForOwner, { ownerEmail: email });
+  const [sortByScriptDate, setSortByScriptDate] = React.useState(false);
+  const [showCreateDialog, setShowCreateDialog] = React.useState(false);
+  const [formFields, setFormFields] = React.useState<Array<{ id: string; ref: string; title: string; type: string }> | null>(null);
+  const [selectedFormId, setSelectedFormId] = React.useState<string | null>(null);
+  const [forms, setForms] = React.useState<Array<{ id: string; title: string }>>([]);
+  const [formsLoading, setFormsLoading] = React.useState(false);
+  
+  const fetchForms = useAction(api.typeformActions.fetchTypeformForms);
+  const fetchFormDetails = useAction(api.typeformActions.fetchTypeformFormDetails);
+  const typeformConfig = useQuery(api.typeform.getConfigForEmail, { email });
+  
+  // Use enriched query that includes accurate nextScriptDate and lastCallDate
+  const clients = useQuery(api.clients.getClientsWithScheduleSummary, { ownerEmail: email });
 
-  // Filter clients based on selected status and search query
+  // Filter and sort clients based on selected status, search query, and sort preference
   // IMPORTANT: This hook must be called before any early returns to maintain hook order
   const filteredClients = React.useMemo(() => {
     // Return empty array if clients are not loaded yet
@@ -65,8 +80,35 @@ export default function DashboardClient({ email }: DashboardClientProps) {
       });
     }
 
+    // Sort clients
+    if (sortByScriptDate) {
+      // Sort by script generation date (soonest at top)
+      filtered = [...filtered].sort((a, b) => {
+        const aDate = a.nextScriptDate ?? Infinity;
+        const bDate = b.nextScriptDate ?? Infinity;
+        return aDate - bDate;
+      });
+    } else if (filter === "all") {
+      // When showing all clients, automatically put paused and inactive at the bottom
+      filtered = [...filtered].sort((a, b) => {
+        const aStatus = a.status || "inactive";
+        const bStatus = b.status || "inactive";
+        
+        // Active clients come first
+        if (aStatus === "active" && bStatus !== "active") return -1;
+        if (bStatus === "active" && aStatus !== "active") return 1;
+        
+        // Paused and inactive come last (paused before inactive)
+        if (aStatus === "paused" && bStatus === "inactive") return -1;
+        if (aStatus === "inactive" && bStatus === "paused") return 1;
+        
+        // Within same status group, maintain original order
+        return 0;
+      });
+    }
+
     return filtered;
-  }, [clients, filter, searchQuery]);
+  }, [clients, filter, searchQuery, sortByScriptDate]);
 
   if (clients === undefined) {
     return (
@@ -86,12 +128,64 @@ export default function DashboardClient({ email }: DashboardClientProps) {
     );
   }
 
+  const handleCreateClick = async () => {
+    // Reset form fields when opening dialog - let dialog handle fetching
+    setFormFields(null);
+    
+    // Fetch forms list if we have access token and haven't loaded yet
+    if (typeformConfig?.accessToken && forms.length === 0 && !formsLoading) {
+      setFormsLoading(true);
+      try {
+        const fetchedForms = await fetchForms({ email });
+        setForms(fetchedForms);
+        
+        // Set the first form ID so dialog can fetch its details
+        if (fetchedForms.length > 0) {
+          setSelectedFormId(fetchedForms[0]?.id);
+        }
+      } catch (error) {
+        console.error("Failed to fetch forms:", error);
+        // Continue anyway - dialog will show fallback
+      } finally {
+        setFormsLoading(false);
+      }
+    } else if (forms.length > 0 && !selectedFormId) {
+      // Forms already loaded, set first form ID
+      setSelectedFormId(forms[0]?.id);
+    }
+    
+    // Open dialog - it will handle fetching form details
+    setShowCreateDialog(true);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <h2 className="text-2xl font-bold text-foreground">
-          Clients
-        </h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-2xl font-bold text-foreground">
+            Clients
+          </h2>
+          <button
+            onClick={handleCreateClick}
+            className="flex items-center justify-center w-8 h-8 rounded-md border border-foreground/15 bg-background hover:bg-foreground/5 transition-all duration-150 text-foreground/70 hover:text-foreground"
+            title="Create manual client"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M8 3v10M3 8h10"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           {/* Search Bar */}
           <div className="relative flex-1 sm:flex-initial sm:w-64">
@@ -126,6 +220,16 @@ export default function DashboardClient({ email }: DashboardClientProps) {
               />
             </svg>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSortByScriptDate(!sortByScriptDate)}
+            className="flex items-center gap-2"
+            title={sortByScriptDate ? "Sort by script date (soonest first)" : "Default sort"}
+          >
+            <ArrowUpDown className="h-4 w-4" />
+            {sortByScriptDate ? "By Date" : "Default"}
+          </Button>
           <SegmentedControl
             options={[
               { value: "grid", label: "Cards" },
@@ -147,7 +251,12 @@ export default function DashboardClient({ email }: DashboardClientProps) {
         </div>
       </div>
       {viewMode === "table" ? (
-        <ClientsTable email={email} />
+        <ClientsTable 
+          email={email} 
+          searchQuery={searchQuery}
+          filter={filter}
+          sortByScriptDate={sortByScriptDate}
+        />
       ) : filteredClients.length === 0 ? (
         <div className="text-center py-12">
           <p className="text-sm text-foreground/60 font-light">
@@ -161,6 +270,14 @@ export default function DashboardClient({ email }: DashboardClientProps) {
           ))}
         </div>
       )}
+      
+      <CreateManualClientDialog
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+        email={email}
+        formFields={formFields}
+        formId={selectedFormId}
+      />
     </div>
   );
 }

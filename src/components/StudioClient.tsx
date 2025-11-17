@@ -24,6 +24,7 @@ type StudioClientProps = {
 
 export default function StudioClient({ email }: StudioClientProps) {
   const [systemPrompt, setSystemPrompt] = React.useState("");
+  const [hasLoadedStoredPrompt, setHasLoadedStoredPrompt] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isTesting, setIsTesting] = React.useState(false);
   const [selectedClientId, setSelectedClientId] = React.useState<string>("");
@@ -51,12 +52,13 @@ export default function StudioClient({ email }: StudioClientProps) {
       : "skip"
   );
 
-  // Load prompt when it's available
+  // Load prompt from server once when it's available
   React.useEffect(() => {
-    if (storedPrompt && !systemPrompt) {
+    if (storedPrompt !== undefined && !hasLoadedStoredPrompt) {
       setSystemPrompt(storedPrompt);
+      setHasLoadedStoredPrompt(true);
     }
-  }, [storedPrompt, systemPrompt]);
+  }, [storedPrompt, hasLoadedStoredPrompt]);
 
   const handleSave = async () => {
     setIsSaving(true);

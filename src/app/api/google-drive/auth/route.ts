@@ -29,6 +29,8 @@ export async function GET(request: Request) {
 
   const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 
-  return NextResponse.redirect(authUrl);
+  // Return redirect response - NextResponse.redirect() sets Location header automatically
+  // Explicitly set status 302 to avoid any ambiguity
+  return NextResponse.redirect(authUrl, { status: 302 });
 }
 

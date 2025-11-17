@@ -9,6 +9,8 @@ import { useRouter } from "next/navigation";
 import type { Id, Doc } from "../../convex/_generated/dataModel";
 import UnlinkedTranscripts from "./UnlinkedTranscripts";
 import ScriptTabContent from "./ScriptTabContent";
+import { AdBriefingForm } from "./AdBriefingForm";
+import { ScriptInputsVisualizer } from "./ScriptInputsVisualizer";
 import { Pencil, X, Plus } from "lucide-react";
 import { Button } from "./ui/button";
 import {
@@ -1069,7 +1071,16 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
 
             {/* Tabs */}
             <div className="flex gap-1 border-b border-foreground/10">
-              {["Overview", "Edit", "Scripts", "Notes", "Call Intelligence", "Transcripts"].map((tab) => (
+              {[
+                "Overview",
+                "Edit",
+                "Scripts",
+                "Script Inputs",
+                "Notes",
+                "Call Intelligence",
+                "Transcripts",
+                "Ad Briefing",
+              ].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab.toLowerCase().replace(" & ", "-").replace(" ", "-"))}
@@ -1450,6 +1461,20 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
               </div>
             )}
 
+            {/* Script Inputs Tab */}
+            {activeTab === "script-inputs" && (
+              <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
+                <CardHeader>
+                  <CardTitle className="text-lg font-medium">
+                    Script Generation Inputs
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ScriptInputsVisualizer ownerEmail={email} client={client} />
+                </CardContent>
+              </Card>
+            )}
+
             {/* Transcripts Tab */}
             {activeTab === "transcripts" && (
               <div>
@@ -1459,6 +1484,20 @@ export default function ClientDetails({ email, responseId }: ClientDetailsProps)
                   showEditButton={true}
                 />
               </div>
+            )}
+
+            {/* Ad Briefing Tab */}
+            {activeTab === "ad-briefing" && (
+              <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
+                <CardHeader>
+                  <CardTitle className="text-lg font-medium">
+                    Ad Strategist Client Briefing
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <AdBriefingForm ownerEmail={email} clientId={client._id} />
+                </CardContent>
+              </Card>
             )}
 
             {/* Call Intelligence Tab */}

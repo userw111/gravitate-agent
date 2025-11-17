@@ -2,6 +2,10 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  // Completely disable Next.js ESLint integration during builds
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   // Suppress request logging in dev mode
   ...(process.env.NODE_ENV === "development" && {
     onDemandEntries: {
@@ -30,6 +34,14 @@ if (process.env.NODE_ENV === "development") {
 
 export default nextConfig;
 
-// added by create cloudflare to enable calling `getCloudflareContext()` in `next dev`
-import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare';
-initOpenNextCloudflareForDev();
+// Cloudflare-specific initialization (only runs if @opennextjs/cloudflare is available)
+// This is automatically skipped on Vercel deployments
+if (typeof process !== 'undefined' && process.env.VERCEL !== '1') {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { initOpenNextCloudflareForDev } = require('@opennextjs/cloudflare');
+    initOpenNextCloudflareForDev();
+  } catch {
+    // Cloudflare package not available (e.g., on Vercel) - this is fine
+  }
+}

@@ -139,8 +139,8 @@ export const AttachmentButton = () => {
 };
 
 export const ChatModeButton = () => {
-    const chatMode = useChatStore(state => state.chatMode);
-    const setChatMode = useChatStore(state => state.setChatMode);
+    const chatMode = useChatStore((state: any) => state.chatMode) as ChatMode;
+    const setChatMode = useChatStore((state: any) => state.setChatMode);
     const [isChatModeOpen, setIsChatModeOpen] = useState(false);
     const hasApiKeyForChatMode = useApiKeysStore(state => state.hasApiKeyForChatMode);
     const isChatPage = usePathname().startsWith('/chat');
@@ -165,10 +165,10 @@ export const ChatModeButton = () => {
 };
 
 export const WebSearchButton = () => {
-    const useWebSearch = useChatStore(state => state.useWebSearch);
-    const setUseWebSearch = useChatStore(state => state.setUseWebSearch);
-    const chatMode = useChatStore(state => state.chatMode);
-    const hasApiKeyForChatMode = useApiKeysStore(state => state.hasApiKeyForChatMode);
+    const useWebSearch = useChatStore((state: any) => state.useWebSearch);
+    const setUseWebSearch = useChatStore((state: any) => state.setUseWebSearch);
+    const chatMode: ChatMode = useChatStore((state: any) => state.chatMode);
+    const hasApiKeyForChatMode = useApiKeysStore((state: any) => state.hasApiKeyForChatMode);
 
     if (!ChatModeConfig[chatMode]?.webSearch && !hasApiKeyForChatMode(chatMode)) return null;
 
@@ -183,7 +183,7 @@ export const WebSearchButton = () => {
             <IconWorld
                 size={16}
                 strokeWidth={2}
-                className={cn(useWebSearch ? '!text-blue-500' : 'text-muted-foreground')}
+                className={cn(useWebSearch ? 'text-blue-500!' : 'text-muted-foreground')}
             />
             {useWebSearch && <p className="text-xs">Web</p>}
         </Button>
@@ -191,7 +191,7 @@ export const WebSearchButton = () => {
 };
 
 export const NewLineIndicator = () => {
-    const editor = useChatStore(state => state.editor);
+    const editor = useChatStore((state: any) => state.editor);
     const hasTextInput = !!editor?.getText();
 
     if (!hasTextInput) return null;
@@ -221,7 +221,7 @@ export const ChatModeOptions = ({
     isRetry?: boolean;
 }) => {
     const { isSignedIn } = useUser();
-    const hasApiKeyForChatMode = useApiKeysStore(state => state.hasApiKeyForChatMode);
+    const hasApiKeyForChatMode = useApiKeysStore((state: any) => state.hasApiKeyForChatMode);
     const isChatPage = usePathname().startsWith('/chat');
     const { push } = useRouter();
     return (

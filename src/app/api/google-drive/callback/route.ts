@@ -18,11 +18,29 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const code = searchParams.get("code");
     const error = searchParams.get("error");
+    const errorDescription = searchParams.get("error_description");
     const state = searchParams.get("state");
 
     if (error) {
+      // Handle specific OAuth errors
+      let errorParam = "oauth_cancelled";
+      if (error === "access_denied") {
+        errorParam = "oauth_access_denied";
+      } else if (error === "invalid_request") {
+        // This typically means OAuth consent screen issue
+        errorParam = "oauth_consent_screen_error";
+      } else if (error === "invalid_client") {
+        errorParam = "invalid_client_credentials";
+      }
+      
+      console.error("[Google Drive OAuth] Authorization error:", {
+        error,
+        errorDescription,
+        state,
+      });
+      
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings?error=oauth_cancelled`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings?error=${errorParam}${errorDescription ? `&error_desc=${encodeURIComponent(errorDescription)}` : ""}`
       );
     }
 
@@ -136,8 +154,15 @@ export async function GET(request: Request) {
 
     const tokenExpiry = Date.now() + (tokenData.expires_in * 1000);
 
-    await convex.mutation(api.googleDrive.setTokensForEmail, {
+    // Get or create organization for user
+    const organizationId = await convex.mutation(api.organizations.getOrCreateDefaultOrganization, {
       email: user.email,
+    });
+
+    // Store tokens at organization level
+    await convex.mutation(api.googleDrive.setTokensForOrganization, {
+      organizationId,
+      connectedByEmail: user.email,
       accessToken: tokenData.access_token,
       refreshToken: tokenData.refresh_token || "",
       tokenExpiry,

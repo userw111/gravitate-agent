@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import type {
   ColumnDef,
-  ColumnFiltersState,
   ColumnSizingState,
   RowData,
   SortingState,
@@ -11,14 +10,12 @@ import type {
 import {
   flexRender,
   getCoreRowModel,
-  getFilteredRowModel,
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -28,9 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { SearchIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import type { Row } from "@tanstack/react-table";
 
 declare module "@tanstack/react-table" {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -54,6 +49,9 @@ type ClientRow = {
 
 type ClientsTableProps = {
   email: string;
+  searchQuery: string;
+  filter: "all" | "active" | "paused" | "inactive";
+  sortByScriptDate: boolean;
 };
 
 const columns: ColumnDef<ClientRow>[] = [
@@ -201,14 +199,8 @@ const columns: ColumnDef<ClientRow>[] = [
   },
 ];
 
-const ClientsTable = ({ email }: ClientsTableProps) => {
-  const [globalFilter, setGlobalFilter] = useState("");
-  const [sorting, setSorting] = useState<SortingState>([
-    {
-      id: "nextScriptDate",
-      desc: false,
-    },
-  ]);
+const ClientsTable = ({ email, searchQuery, filter, sortByScriptDate }: ClientsTableProps) => {
+  const [sorting, setSorting] = useState<SortingState>([]);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
 
   const router = useRouter();
@@ -219,7 +211,7 @@ const ClientsTable = ({ email }: ClientsTableProps) => {
 
   const data: ClientRow[] = useMemo(() => {
     if (!summaries) return [];
-    return summaries.map((client) => {
+    let mapped = summaries.map((client) => {
       const contactName =
         client.contactFirstName && client.contactLastName
           ? `${client.contactFirstName} ${client.contactLastName}`
@@ -244,39 +236,79 @@ const ClientsTable = ({ email }: ClientsTableProps) => {
         nextScriptDate: client.nextScriptDate ?? null,
       };
     });
-  }, [summaries]);
 
-  // Custom global filter function that searches across all fields
-  const globalFilterFn = (row: Row<ClientRow>, columnId: string, filterValue: string) => {
-    const searchValue = filterValue.toLowerCase().trim();
-    if (!searchValue) return true;
+    // Filter by status
+    if (filter !== "all") {
+      mapped = mapped.filter((client) => {
+        if (filter === "active") {
+          return client.status === "active";
+        } else if (filter === "paused") {
+          return client.status === "paused";
+        } else if (filter === "inactive") {
+          return client.status === "inactive";
+        }
+        return true;
+      });
+    }
 
-    const client = row.original;
-    const searchableFields = [
-      client.businessName,
-      client.contactName,
-      client.businessEmail,
-      client.status,
-      client.lastCallDate ? new Date(client.lastCallDate).toLocaleDateString() : "",
-      client.lastScriptDate ? new Date(client.lastScriptDate).toLocaleDateString() : "",
-      client.nextScriptDate ? new Date(client.nextScriptDate).toLocaleDateString() : "",
-    ];
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      mapped = mapped.filter((client) => {
+        const businessName = client.businessName?.toLowerCase() || "";
+        const contactName = client.contactName?.toLowerCase() || "";
+        const email = client.businessEmail?.toLowerCase() || "";
+        const status = client.status?.toLowerCase() || "";
+        const lastCallDate = client.lastCallDate ? new Date(client.lastCallDate).toLocaleDateString().toLowerCase() : "";
+        const lastScriptDate = client.lastScriptDate ? new Date(client.lastScriptDate).toLocaleDateString().toLowerCase() : "";
+        const nextScriptDate = client.nextScriptDate ? new Date(client.nextScriptDate).toLocaleDateString().toLowerCase() : "";
+        
+        return (
+          businessName.includes(query) ||
+          contactName.includes(query) ||
+          email.includes(query) ||
+          status.includes(query) ||
+          lastCallDate.includes(query) ||
+          lastScriptDate.includes(query) ||
+          nextScriptDate.includes(query)
+        );
+      });
+    }
 
-    return searchableFields.some((field) =>
-      field?.toLowerCase().includes(searchValue)
-    );
-  };
+    // Sort clients
+    if (sortByScriptDate) {
+      // Sort by script generation date (soonest at top)
+      mapped = [...mapped].sort((a, b) => {
+        const aDate = a.nextScriptDate ?? Infinity;
+        const bDate = b.nextScriptDate ?? Infinity;
+        return aDate - bDate;
+      });
+    } else if (filter === "all") {
+      // When showing all clients, automatically put paused and inactive at the bottom
+      mapped = [...mapped].sort((a, b) => {
+        // Active clients come first
+        if (a.status === "active" && b.status !== "active") return -1;
+        if (b.status === "active" && a.status !== "active") return 1;
+        
+        // Paused and inactive come last (paused before inactive)
+        if (a.status === "paused" && b.status === "inactive") return -1;
+        if (a.status === "inactive" && b.status === "paused") return 1;
+        
+        // Within same status group, maintain original order
+        return 0;
+      });
+    }
+    
+    return mapped;
+  }, [summaries, filter, searchQuery, sortByScriptDate]);
 
   const table = useReactTable({
     data,
     columns,
     state: {
       sorting,
-      globalFilter,
       columnSizing,
     },
-    onGlobalFilterChange: setGlobalFilter,
-    globalFilterFn: globalFilterFn,
     onColumnSizingChange: setColumnSizing,
     columnResizeMode: "onChange",
     enableColumnResizing: true,
@@ -284,7 +316,6 @@ const ClientsTable = ({ email }: ClientsTableProps) => {
       minSize: 50,
     },
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
     onSortingChange: setSorting,
     enableSortingRemoval: false,
@@ -300,11 +331,11 @@ const ClientsTable = ({ email }: ClientsTableProps) => {
     );
   }
 
-  if (!summaries.length) {
+  if (!data.length) {
     return (
       <div className="text-center py-12">
         <p className="text-sm text-foreground/60 font-light">
-          No clients found. Sync responses from your Typeform to get started.
+          No clients found.
         </p>
       </div>
     );
@@ -313,20 +344,6 @@ const ClientsTable = ({ email }: ClientsTableProps) => {
   return (
     <div className="w-full">
       <div className="rounded-xl border bg-background">
-        <div className="px-6 py-4 border-b bg-muted/30">
-          <div className="relative max-w-md">
-            <Input
-              value={globalFilter ?? ""}
-              onChange={(e) => setGlobalFilter(e.target.value)}
-              placeholder="Search clients by name, email, status, or date..."
-              type="text"
-              className="pl-9"
-            />
-            <div className="text-muted-foreground/80 pointer-events-none absolute inset-y-0 left-0 flex items-center justify-center pl-3">
-              <SearchIcon size={16} />
-            </div>
-          </div>
-        </div>
         <Table className="table-fixed w-full">
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (

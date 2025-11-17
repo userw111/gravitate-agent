@@ -131,9 +131,11 @@ export const scheduleCronJobsForClient = action({
     clientId: v.id("clients"),
     ownerEmail: v.string(),
     baseTime: v.optional(v.number()), // Unix timestamp to calculate from (defaults to now)
+    skipFirstJob: v.optional(v.boolean()), // When true, skip the 25-day job and start at the recurring schedule
   },
   handler: async (ctx: ActionCtx, args): Promise<{ scheduled: number }> => {
     const baseTime = args.baseTime || Date.now();
+    const skipFirstJob = args.skipFirstJob === true;
     
     // Get client
     const client = await ctx.runQuery(api.clients.getClientById, {
@@ -163,33 +165,40 @@ export const scheduleCronJobsForClient = action({
     
     let scheduledCount = 0;
     
-    // First cron job: 25 days after creation
-    const firstJobTarget = baseTime + (25 * 24 * 60 * 60 * 1000);
-    const firstJobTime = etMidnightForSameCalendarDay(firstJobTarget);
-    const firstJobDayOfMonth = getEtDatePartsFromUtc(firstJobTime).day;
-    
-    const firstCronJobId = await ctx.runMutation(api.cronJobs.createCronJobRecord, {
-      ownerEmail: args.ownerEmail,
-      clientId: args.clientId,
-      scheduledTime: firstJobTime,
-      dayOfMonth: firstJobDayOfMonth,
-      isRepeating: false, // This is a one-time job
-    });
-    
-    await scheduleCloudflareCronTrigger(ctx, {
-      cronJobId: firstCronJobId,
-      clientId: args.clientId,
-      ownerEmail: args.ownerEmail,
-      scheduledTime: firstJobTime,
-      isRepeating: false,
-      dayOfMonth: firstJobDayOfMonth,
-    });
-    
-    scheduledCount++;
-    
-    // Second cron job: 30 days after first job (55 days total from creation)
-    // This exact date's day of month becomes the recurring monthly day
-    const secondJobTarget = firstJobTime + (30 * 24 * 60 * 60 * 1000);
+    let firstJobDayOfMonth: number | null = null;
+
+    // First cron job: 25 days after creation (optional)
+    if (!skipFirstJob) {
+      const firstJobTarget = baseTime + 25 * 24 * 60 * 60 * 1000;
+      const firstJobTime = etMidnightForSameCalendarDay(firstJobTarget);
+      firstJobDayOfMonth = getEtDatePartsFromUtc(firstJobTime).day;
+
+      const firstCronJobId = await ctx.runMutation(api.cronJobs.createCronJobRecord, {
+        ownerEmail: args.ownerEmail,
+        clientId: args.clientId,
+        scheduledTime: firstJobTime,
+        dayOfMonth: firstJobDayOfMonth,
+        isRepeating: false, // This is a one-time job
+      });
+
+      await scheduleCloudflareCronTrigger(ctx, {
+        cronJobId: firstCronJobId,
+        clientId: args.clientId,
+        ownerEmail: args.ownerEmail,
+        scheduledTime: firstJobTime,
+        isRepeating: false,
+        dayOfMonth: firstJobDayOfMonth,
+      });
+
+      scheduledCount++;
+    }
+
+    // Second cron job:
+    // - Normal mode: 30 days after first job (55 days total from creation)
+    // - Skip-first mode: baseTime becomes the first monthly run date
+    const secondJobTarget = skipFirstJob
+      ? baseTime // Use baseTime directly as the first monthly date
+      : (baseTime + 25 * 24 * 60 * 60 * 1000) + 30 * 24 * 60 * 60 * 1000;
     const secondJobTime = etMidnightForSameCalendarDay(secondJobTarget);
     const recurringDayOfMonth = getEtDatePartsFromUtc(secondJobTime).day;
     
@@ -214,7 +223,12 @@ export const scheduleCronJobsForClient = action({
     
     scheduledCount++;
     
-    console.log(`[CronJobs] Scheduled ${scheduledCount} cron jobs for client ${args.clientId}: first at day ${firstJobDayOfMonth} (25 days), recurring on day ${recurringDayOfMonth} (monthly)`);
+    console.log(
+      `[CronJobs] Scheduled ${scheduledCount} cron jobs for client ${args.clientId}:` +
+        (skipFirstJob
+          ? ` starting at day ${recurringDayOfMonth} (55 days from base, then monthly)`
+          : ` first at day ${firstJobDayOfMonth} (25 days), recurring on day ${recurringDayOfMonth} (monthly)`)
+    );
     return { scheduled: scheduledCount };
   },
 });
@@ -292,10 +306,16 @@ export const createCronJobRecord = mutation({
     isRepeating: v.boolean(),
   },
   handler: async (ctx: MutationCtx, args) => {
+    const client = await ctx.db.get(args.clientId);
+    if (!client) {
+      throw new Error(`Client not found: ${args.clientId}`);
+    }
+
     const now = Date.now();
     const cronJobId = `cron_${args.clientId}_${args.scheduledTime}_${Math.random().toString(36).substring(7)}`;
     
     await ctx.db.insert("cron_jobs", {
+      organizationId: client.organizationId,
       ownerEmail: args.ownerEmail,
       clientId: args.clientId,
       cronJobId,

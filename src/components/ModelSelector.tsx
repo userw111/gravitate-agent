@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, Zap } from "lucide-react";
+import { Sparkles, Zap, Brain } from "lucide-react";
 
 export type ModelOption = {
   value: string;
@@ -32,6 +32,12 @@ const POPULAR_MODELS: ModelOption[] = [
     description: "Speed",
     icon: <Zap className="h-3.5 w-3.5" />,
     badge: "Thinking",
+  },
+  {
+    value: "google/gemini-2.5-pro",
+    label: "Gemini 2.5 Pro",
+    description: "Advanced reasoning",
+    icon: <Brain className="h-3.5 w-3.5" />,
   },
 ];
 

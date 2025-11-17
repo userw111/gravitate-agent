@@ -50,23 +50,19 @@ export const useChatEditor = (editorProps: {
             if (text === '/') {
                 // setOpenPromptsBotCombo(true);
             } else {
-                const newHTML = html.replace(/::((?:(?!::).)+)::/g, (_, content) => {
+                const newHTML = html.replace(/::((?:(?!::).)+)::/g, (_: string, content: string) => {
                     return ` <mark class="prompt-highlight">${content}</mark> `;
                 });
 
                 if (newHTML !== html) {
-                    editor.commands.setContent(newHTML, true, {
-                        preserveWhitespace: true,
-                    });
+                    editor.commands.setContent(newHTML);
                 }
                 // setOpenPromptsBotCombo(false);
             }
         },
         onCreate(props) {
             if (editorProps?.defaultContent) {
-                props.editor.commands.setContent(editorProps?.defaultContent || '', true, {
-                    preserveWhitespace: true,
-                });
+                props.editor.commands.setContent(editorProps?.defaultContent || '');
             }
             if (editorProps?.onInit) {
                 editorProps.onInit({ editor: props.editor });

@@ -1,7 +1,7 @@
 import { action, ActionCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { api } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 
 const FIREFLIES_API_URL = "https://api.fireflies.ai/graphql";
 
@@ -73,6 +73,8 @@ type ClientLookup = {
   byDomain: Map<string, ClientLinkingMeta[]>;
   byDomainKey: Map<string, ClientLinkingMeta[]>;
 };
+
+type LinkingHistoryEntry = NonNullable<Doc<"fireflies_transcripts">["linkingHistory"]>[number];
 
 function buildClientLookup(
   clients: Array<{ _id: Id<"clients">; businessEmail?: string | null; businessName?: string | null }>
@@ -928,7 +930,7 @@ export const notifyTranscriptLinkingViaTelegram = action({
     const alreadyEscalated =
       Array.isArray(transcript.linkingHistory) &&
       transcript.linkingHistory.some(
-        (entry) => entry.stage === "telegram" && entry.status === "success"
+        (entry: LinkingHistoryEntry) => entry.stage === "telegram" && entry.status === "success"
       );
     if (alreadyEscalated) {
       return {
@@ -1124,7 +1126,7 @@ The meeting concluded with action items for next week.`,
         };
       }
 
-      const aiResult = await linkingResponse.json();
+      const aiResult: any = await linkingResponse.json();
       
       if (aiResult.status === "linked") {
         return {
@@ -1140,7 +1142,7 @@ The meeting concluded with action items for next week.`,
         });
         
         const telegramSent = updatedTranscript?.linkingHistory?.some(
-          (entry) => entry.stage === "telegram" && entry.status === "success"
+          (entry: LinkingHistoryEntry) => entry.stage === "telegram" && entry.status === "success"
         );
 
         if (telegramSent) {

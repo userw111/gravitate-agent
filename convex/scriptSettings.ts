@@ -1,5 +1,34 @@
 import { mutation, query, QueryCtx, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
+
+async function ensureOrganizationForEmail(ctx: MutationCtx, email: string): Promise<Id<"organizations">> {
+  const existingMember = await ctx.db
+    .query("organization_members")
+    .withIndex("by_email", (q) => q.eq("email", email))
+    .first();
+
+  if (existingMember) {
+    return existingMember.organizationId;
+  }
+
+  const now = Date.now();
+  const organizationId = await ctx.db.insert("organizations", {
+    name: `${email.split("@")[0]}'s Organization`,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await ctx.db.insert("organization_members", {
+    organizationId,
+    email,
+    role: "owner",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return organizationId;
+}
 
 /**
  * Get script generation settings for a user
@@ -46,7 +75,10 @@ export const updateSettings = mutation({
       return existing._id;
     }
     
+    const organizationId = await ensureOrganizationForEmail(ctx, args.email);
+
     return await ctx.db.insert("script_settings", {
+      organizationId,
       email: args.email,
       defaultModel: args.defaultModel,
       defaultThinkingEffort: args.defaultThinkingEffort,

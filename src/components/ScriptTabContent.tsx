@@ -465,6 +465,24 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
         return;
       }
 
+      // First, ensure folders exist and get the month folder ID
+      const dateMs = selectedScript?.createdAt || Date.now();
+      const foldersRes = await fetch("/api/google-drive/create-folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, dateMs }),
+      });
+
+      if (!foldersRes.ok) {
+        const error = (await foldersRes.json()) as { error?: string };
+        throw new Error(error.error || "Failed to ensure Drive folders");
+      }
+
+      const foldersData = (await foldersRes.json()) as { monthFolderId?: string };
+      if (!foldersData.monthFolderId) {
+        throw new Error("Failed to get month folder ID");
+      }
+
       const title = selectedScript?.title || "Script";
 
       const response = await fetch("/api/google-drive/create-doc", {
@@ -475,6 +493,7 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
         body: JSON.stringify({
           title,
           content: html,
+          parentFolderId: foldersData.monthFolderId,
         }),
       });
 
@@ -494,7 +513,7 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
     } finally {
       setIsCreatingDoc(false);
     }
-  }, [scriptContent, selectedScript]);
+  }, [scriptContent, selectedScript, clientId]);
 
   const handleLinkSave = React.useCallback(() => {
     if (!editor) return;
@@ -1263,7 +1282,7 @@ export default function ScriptTabContent({ clientId, ownerEmail }: ScriptTabCont
                       onClick={handleCopyRich}
                       className="cursor-pointer hover:bg-accent hover:text-accent-foreground transition-all duration-200"
                     >
-                      {isCopying ? "Copying..." : "Copy Rich Text"}
+                      {isCopying ? "Copying..." : "Copy"}
                     </Button>
                     <Button
                       variant="outline"

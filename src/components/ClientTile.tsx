@@ -2,20 +2,21 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "./ui/card";
 import { useRouter } from "next/navigation";
-import { useQuery } from "convex/react";
-import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 
 type ClientTileProps = {
   client: {
     _id: Id<"clients">;
     businessName: string;
-    businessEmail: string;
+    businessEmail?: string;
     contactFirstName?: string;
     contactLastName?: string;
     status?: "active" | "paused" | "inactive";
     onboardingResponseId?: string;
     createdAt: number;
+    // Enriched fields from getClientsWithScheduleSummary
+    lastCallDate?: number | null;
+    nextScriptDate?: number | null;
   };
 };
 
@@ -24,19 +25,13 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function getNextScriptDate(createdAt: number): string {
-  // Calculate next script date (e.g., 7 days after creation)
-  const date = new Date(createdAt);
-  date.setDate(date.getDate() + 7);
-  return formatDate(date.getTime());
-}
-
 export default function ClientTile({ client }: ClientTileProps) {
   const router = useRouter();
   
-  // TODO: Add query to get transcripts by clientId
-  // For now, we'll use createdAt as last call date
-  const lastCallDate = client.createdAt;
+  // Use accurate dates from enriched client data
+  // These are provided by getClientsWithScheduleSummary query
+  const nextScriptDate = client.nextScriptDate ?? null;
+  const lastCallDate = client.lastCallDate ?? null;
   
   const displayName = client.businessName || 
     (client.contactFirstName && client.contactLastName ? `${client.contactFirstName} ${client.contactLastName}` : 
@@ -98,7 +93,9 @@ export default function ClientTile({ client }: ClientTileProps) {
                 fill="currentColor"
               />
             </svg>
-            <span className="font-light">Next script: {getNextScriptDate(client.createdAt)}</span>
+            <span className="font-light">
+              Next script: {nextScriptDate ? formatDate(nextScriptDate) : "Not scheduled"}
+            </span>
           </div>
           <div className="flex items-center gap-2 text-sm text-foreground/70">
             <svg
@@ -114,7 +111,9 @@ export default function ClientTile({ client }: ClientTileProps) {
                 fill="currentColor"
               />
             </svg>
-            <span className="font-light">Last call: {formatDate(lastCallDate)}</span>
+            <span className="font-light">
+              Last call: {lastCallDate ? formatDate(lastCallDate) : "No calls"}
+            </span>
           </div>
         </div>
       </CardHeader>

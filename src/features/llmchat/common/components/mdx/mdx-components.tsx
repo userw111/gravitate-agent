@@ -3,8 +3,10 @@ import { isValidUrl } from '@repo@/features/llmchat/shared/utils';
 import { MDXRemote } from 'next-mdx-remote/rsc';
 import { ComponentProps, ReactElement, useContext } from 'react';
 
+type MDXProps = { children: React.ReactNode };
+
 export const mdxComponents: ComponentProps<typeof MDXRemote>['components'] = {
-    Source: ({ children }) => {
+    Source: ({ children }: MDXProps) => {
         const { getSourceByIndex } = useContext(CitationProviderContext);
         const index = children as string;
 
@@ -30,28 +32,28 @@ export const mdxComponents: ComponentProps<typeof MDXRemote>['components'] = {
             </LinkPreviewPopover>
         );
     },
-    p: ({ children }) => {
+    p: ({ children }: MDXProps) => {
         return <p>{children}</p>;
     },
-    li: ({ children }) => {
+    li: ({ children }: MDXProps) => {
         return <li>{children}</li>;
     },
 
-    pre: ({ children }) => {
+    pre: ({ children }: MDXProps) => {
         if (typeof children === 'string') {
             return <CodeBlock code={children.replace(/<FadeEffect \/>$/, '')} />;
         }
-        const codeElement = children as ReactElement;
+        const codeElement = children as ReactElement<{ className?: string; children?: React.ReactNode }>;
         const className = codeElement?.props?.className || '';
         const lang = className.replace('language-', '');
         const code = codeElement?.props?.children;
 
         return <CodeBlock code={String(code).replace(/<FadeEffect \/>$/, '')} lang={lang} />;
     },
-    code: ({ children, className }) => {
+    code: ({ children, className }: { children: React.ReactNode; className?: string }) => {
         if (!className) {
             return (
-                <code className="border-brand/20 !bg-brand/10 text-brand rounded-md border px-1.5 py-0.5 font-mono text-sm">
+                <code className="border-brand/20 bg-brand/10! text-brand rounded-md border px-1.5 py-0.5 font-mono text-sm">
                     {children}
                 </code>
             );

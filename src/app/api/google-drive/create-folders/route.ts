@@ -217,8 +217,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Client not found or access denied" }, { status: 403 });
     }
 
-    // Load Google Drive tokens
-    const cfg = await convex.query(api.googleDrive.getConfigForEmail, { email: ownerEmail });
+    // Get organization for owner
+    const org = await convex.query(api.organizations.getOrganizationForUser, { email: ownerEmail });
+    if (!org) {
+      return NextResponse.json({ error: "Organization not found" }, { status: 400 });
+    }
+
+    // Load Google Drive tokens for organization
+    const cfg = await convex.query(api.googleDrive.getConfigForOrganization, { organizationId: org._id });
     if (!cfg?.accessToken || !cfg?.refreshToken) {
       return NextResponse.json({ error: "Google Drive not connected" }, { status: 400 });
     }
@@ -231,8 +237,9 @@ export async function POST(request: Request) {
         const refreshed = await refreshAccessToken(cfg.refreshToken);
         accessToken = refreshed.access_token;
         const newExpiry = Date.now() + refreshed.expires_in * 1000;
-        await convex.mutation(api.googleDrive.setTokensForEmail, {
-          email: ownerEmail,
+        await convex.mutation(api.googleDrive.setTokensForOrganization, {
+          organizationId: org._id,
+          connectedByEmail: cfg.connectedByEmail,
           accessToken,
           refreshToken: refreshed.refresh_token || cfg.refreshToken,
           tokenExpiry: newExpiry,

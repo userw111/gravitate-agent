@@ -1,5 +1,34 @@
 import { mutation, query, QueryCtx, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
+
+async function ensureOrganizationForEmail(ctx: MutationCtx, email: string): Promise<Id<"organizations">> {
+  const existingMember = await ctx.db
+    .query("organization_members")
+    .withIndex("by_email", (q) => q.eq("email", email))
+    .first();
+
+  if (existingMember) {
+    return existingMember.organizationId;
+  }
+
+  const now = Date.now();
+  const organizationId = await ctx.db.insert("organizations", {
+    name: `${email.split("@")[0]}'s Organization`,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await ctx.db.insert("organization_members", {
+    organizationId,
+    email,
+    role: "owner",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return organizationId;
+}
 
 export const getConfigForEmail = query({
   args: { email: v.string() },
@@ -19,11 +48,17 @@ export const setSecretForEmail = mutation({
       .withIndex("by_email", (q) => q.eq("email", args.email))
       .unique();
     const now = Date.now();
+    const organizationId = await ensureOrganizationForEmail(ctx, args.email);
     if (existing) {
-      await ctx.db.patch(existing._id, { secret: args.secret, updatedAt: now });
+      await ctx.db.patch(existing._id, {
+        secret: args.secret,
+        updatedAt: now,
+        ...(existing.organizationId ? {} : { organizationId }),
+      });
       return existing._id;
     }
     return await ctx.db.insert("typeform_configs", {
+      organizationId,
       email: args.email,
       secret: args.secret,
       createdAt: now,
@@ -40,12 +75,18 @@ export const setAccessTokenForEmail = mutation({
       .withIndex("by_email", (q) => q.eq("email", args.email))
       .unique();
     const now = Date.now();
+    const organizationId = await ensureOrganizationForEmail(ctx, args.email);
     if (existing) {
-      await ctx.db.patch(existing._id, { accessToken: args.accessToken, updatedAt: now });
+      await ctx.db.patch(existing._id, {
+        accessToken: args.accessToken,
+        updatedAt: now,
+        ...(existing.organizationId ? {} : { organizationId }),
+      });
       return existing._id;
     }
     // If config doesn't exist, create it with just the access token
     return await ctx.db.insert("typeform_configs", {
+      organizationId,
       email: args.email,
       accessToken: args.accessToken,
       createdAt: now,
@@ -62,6 +103,7 @@ export const storeWebhook = mutation({
     formId: v.optional(v.string()),
   },
   handler: async (ctx: MutationCtx, args) => {
+    const organizationId = await ensureOrganizationForEmail(ctx, args.email);
     // Check for duplicate payloads by comparing with existing webhooks for this email
     const existingWebhooks = await ctx.db
       .query("typeform_webhooks")
@@ -82,6 +124,7 @@ export const storeWebhook = mutation({
     
     // No duplicate found, insert new webhook
     return await ctx.db.insert("typeform_webhooks", {
+      organizationId,
       email: args.email,
       payload: args.payload,
       eventType: args.eventType,
@@ -207,7 +250,9 @@ export const storeResponse = mutation({
     }))),
   },
   handler: async (ctx: MutationCtx, args) => {
+    const organizationId = await ensureOrganizationForEmail(ctx, args.email);
     return await ctx.db.insert("typeform_responses", {
+      organizationId,
       email: args.email,
       formId: args.formId,
       responseId: args.responseId,
@@ -275,27 +320,80 @@ export const getAllResponsesForEmail = query({
 export const getUnlinkedResponsesCountForEmail = query({
   args: { email: v.string() },
   handler: async (ctx: QueryCtx, args) => {
-    // Get all responses
-    const allResponses = await ctx.db
-      .query("typeform_responses")
-      .withIndex("by_email_synced", (q) => q.eq("email", args.email))
-      .collect();
-    
-    // Get all clients
-    const allClients = await ctx.db
-      .query("clients")
-      .withIndex("by_owner", (q) => q.eq("ownerEmail", args.email))
-      .collect();
-    
-    // Create a set of responseIds that have clients
-    const linkedResponseIds = new Set(
-      allClients
-        .map((c) => c.onboardingResponseId)
-        .filter((id): id is string => id !== undefined)
+    const timestamp = new Date().toISOString();
+    console.log(
+      "[TYPEFORM] getUnlinkedResponsesCountForEmail called",
+      JSON.stringify(
+        {
+          email: args.email,
+          timestamp,
+        },
+        null,
+        2
+      )
     );
-    
-    // Return count of unlinked responses
-    return allResponses.filter((r) => !linkedResponseIds.has(r.responseId)).length;
+
+    try {
+      // Get all responses
+      const allResponses = await ctx.db
+        .query("typeform_responses")
+        .withIndex("by_email_synced", (q) => q.eq("email", args.email))
+        .collect();
+
+      // Get all clients
+      const allClients = await ctx.db
+        .query("clients")
+        .withIndex("by_owner", (q) => q.eq("ownerEmail", args.email))
+        .collect();
+
+      // Create a set of responseIds that have clients
+      const linkedResponseIds = new Set(
+        allClients
+          .map((c) => c.onboardingResponseId)
+          .filter((id): id is string => id !== undefined)
+      );
+
+      const unlinkedResponses = allResponses.filter(
+        (r) => !linkedResponseIds.has(r.responseId)
+      );
+
+      console.log(
+        "[TYPEFORM] getUnlinkedResponsesCountForEmail computed result",
+        JSON.stringify(
+          {
+            email: args.email,
+            timestamp,
+            totalResponses: allResponses.length,
+            totalClients: allClients.length,
+            linkedResponseIdsCount: linkedResponseIds.size,
+            unlinkedCount: unlinkedResponses.length,
+            sampleResponseIds: allResponses.slice(0, 5).map((r) => r.responseId),
+            sampleLinkedIds: Array.from(linkedResponseIds).slice(0, 5),
+          },
+          null,
+          2
+        )
+      );
+
+      // Return count of unlinked responses
+      return unlinkedResponses.length;
+    } catch (error) {
+      console.error(
+        "[TYPEFORM] getUnlinkedResponsesCountForEmail error",
+        JSON.stringify(
+          {
+            email: args.email,
+            timestamp,
+            message: (error as any)?.message,
+            name: (error as any)?.name,
+            stack: (error as any)?.stack,
+          },
+          null,
+          2
+        )
+      );
+      throw error;
+    }
   },
 });
 

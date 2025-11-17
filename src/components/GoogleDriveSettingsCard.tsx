@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 
 export default function GoogleDriveSettingsCard({ email }: { email: string }) {
   const searchParams = useSearchParams();
+  const org = useQuery(api.organizations.getOrganizationForUser, { email });
   const cfg = useQuery(api.googleDrive.getConfigForEmail, { email });
   const disconnectAccount = useMutation(api.googleDrive.disconnectAccount);
   const [disconnecting, setDisconnecting] = React.useState(false);
@@ -30,12 +31,19 @@ export default function GoogleDriveSettingsCard({ email }: { email: string }) {
   };
 
   const handleDisconnect = async () => {
-    if (!confirm("Are you sure you want to disconnect your Google Drive account? This will prevent scripts from being uploaded to Drive.")) {
+    const message = org 
+      ? "Are you sure you want to disconnect your organization's Google Drive account? This will prevent scripts from being uploaded to Drive for all organization members."
+      : "Are you sure you want to disconnect your Google Drive account? This will prevent scripts from being uploaded to Drive.";
+    
+    if (!confirm(message)) {
       return;
     }
     setDisconnecting(true);
     try {
-      await disconnectAccount({ email });
+      await disconnectAccount({ 
+        email,
+        organizationId: org?._id,
+      });
     } catch (error) {
       console.error("Failed to disconnect Google Drive:", error);
       alert(error instanceof Error ? error.message : "Failed to disconnect account");
@@ -52,8 +60,13 @@ export default function GoogleDriveSettingsCard({ email }: { email: string }) {
       
       <div className="space-y-2">
         <p className="text-sm text-foreground/70">
-          Connect your Google Drive account to automatically upload generated scripts to Drive.
+          Connect a Google Drive account for your organization. All members of your organization will use the same Google Drive account for script uploads.
         </p>
+        {cfg?.connectedByEmail && cfg.connectedByEmail !== email && (
+          <p className="text-xs text-foreground/60 italic">
+            Connected by: {cfg.connectedByEmail}
+          </p>
+        )}
 
         {showSuccess && (
           <div className="rounded-md border border-green-500/30 bg-green-500/10 p-3">
@@ -84,6 +97,46 @@ export default function GoogleDriveSettingsCard({ email }: { email: string }) {
             <p className="text-sm text-red-500 font-medium mb-1">Token Exchange Failed</p>
             <p className="text-xs text-red-500/80">
               Failed to exchange authorization code. Please try connecting again.
+            </p>
+          </div>
+        )}
+        
+        {searchParams.get("error") === "oauth_consent_screen_error" && (
+          <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3">
+            <p className="text-sm text-red-500 font-medium mb-1">OAuth Consent Screen Error</p>
+            <p className="text-xs text-red-500/80 mb-2">
+              Your Google OAuth app doesn't comply with Google's OAuth 2.0 policy. This usually means:
+            </p>
+            <ul className="text-xs text-red-500/80 list-disc list-inside space-y-1 mb-2">
+              <li>The app is in "Testing" mode and your email is not added as a test user</li>
+              <li>The OAuth consent screen is not properly configured</li>
+              <li>The redirect URI doesn't match what's configured in Google Cloud Console</li>
+            </ul>
+            <p className="text-xs text-red-500/80 font-medium">
+              See GOOGLE_DRIVE_SETUP.md for detailed setup instructions.
+            </p>
+            {searchParams.get("error_desc") && (
+              <p className="text-xs text-red-500/60 mt-2 italic">
+                Google error: {decodeURIComponent(searchParams.get("error_desc") || "")}
+              </p>
+            )}
+          </div>
+        )}
+        
+        {searchParams.get("error") === "oauth_access_denied" && (
+          <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3">
+            <p className="text-sm text-red-500 font-medium mb-1">Access Denied</p>
+            <p className="text-xs text-red-500/80">
+              You denied access to the Google Drive integration. Please try again and grant the required permissions.
+            </p>
+          </div>
+        )}
+        
+        {searchParams.get("error") === "oauth_cancelled" && (
+          <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3">
+            <p className="text-sm text-yellow-500 font-medium mb-1">Authorization Cancelled</p>
+            <p className="text-xs text-yellow-500/80">
+              The Google OAuth flow was cancelled. You can try connecting again when ready.
             </p>
           </div>
         )}

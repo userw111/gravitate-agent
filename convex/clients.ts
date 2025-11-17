@@ -56,6 +56,188 @@ export const getClientByOnboardingResponseId = query({
 });
 
 /**
+ * Check for duplicate clients based on identifying information
+ */
+export const findDuplicateClient = query({
+  args: {
+    ownerEmail: v.string(),
+    businessEmail: v.optional(v.string()),
+    businessName: v.optional(v.string()),
+    website: v.optional(v.string()),
+  },
+  handler: async (ctx: QueryCtx, args) => {
+    const allClients = await ctx.db
+      .query("clients")
+      .withIndex("by_owner", (q) => q.eq("ownerEmail", args.ownerEmail))
+      .collect();
+    
+    // Normalize inputs for comparison
+    const normalizedBusinessEmail = args.businessEmail?.toLowerCase().trim();
+    const normalizedBusinessName = args.businessName?.toLowerCase().trim();
+    const normalizedWebsite = args.website?.toLowerCase().trim().replace(/^https?:\/\//, "").replace(/^www\./, "");
+    
+    for (const client of allClients) {
+      // Check business email match
+      if (normalizedBusinessEmail && client.businessEmail) {
+        if (client.businessEmail.toLowerCase().trim() === normalizedBusinessEmail) {
+          return client;
+        }
+      }
+      
+      // Check business name match (case-insensitive)
+      if (normalizedBusinessName && client.businessName) {
+        if (client.businessName.toLowerCase().trim() === normalizedBusinessName) {
+          return client;
+        }
+      }
+      
+      // Check website match (normalize URLs)
+      if (normalizedWebsite && client.businessEmails) {
+        // Check if any business email domain matches website
+        for (const email of client.businessEmails) {
+          const emailDomain = email.toLowerCase().trim().split("@")[1];
+          if (emailDomain && normalizedWebsite.includes(emailDomain)) {
+            return client;
+          }
+        }
+      }
+    }
+    
+    return null;
+  },
+});
+
+/**
+ * Create a manual client (not from Typeform)
+ */
+export const createManualClient = mutation({
+  args: {
+    ownerEmail: v.string(),
+    businessEmail: v.optional(v.string()),
+    businessName: v.string(),
+    contactFirstName: v.optional(v.string()),
+    contactLastName: v.optional(v.string()),
+    targetRevenue: v.optional(v.number()),
+    website: v.optional(v.string()),
+    generateScriptImmediately: v.optional(v.boolean()),
+    enableCronJobs: v.optional(v.boolean()),
+    cronJobBaseTime: v.optional(v.number()), // Base time for calculating cron job schedule (defaults to now)
+    skipFirstCronJob: v.optional(v.boolean()), // When true, skip the 25-day cron job and start at recurring schedule
+    monthlyStartTime: v.optional(v.number()), // Custom start time for monthly schedule (when skipping 25-day)
+  },
+  handler: async (ctx: MutationCtx, args) => {
+    // Check for duplicates first
+    const duplicate = await ctx.db
+      .query("clients")
+      .withIndex("by_owner", (q) => q.eq("ownerEmail", args.ownerEmail))
+      .collect()
+      .then(clients => {
+        const normalizedBusinessEmail = args.businessEmail?.toLowerCase().trim();
+        const normalizedBusinessName = args.businessName?.toLowerCase().trim();
+        const normalizedWebsite = args.website?.toLowerCase().trim().replace(/^https?:\/\//, "").replace(/^www\./, "");
+        
+        for (const client of clients) {
+          // Check business email match
+          if (normalizedBusinessEmail && client.businessEmail) {
+            if (client.businessEmail.toLowerCase().trim() === normalizedBusinessEmail) {
+              return client;
+            }
+          }
+          
+          // Check business name match (case-insensitive)
+          if (normalizedBusinessName && client.businessName) {
+            if (client.businessName.toLowerCase().trim() === normalizedBusinessName) {
+              return client;
+            }
+          }
+          
+          // Check website match
+          if (normalizedWebsite && client.businessEmails) {
+            for (const email of client.businessEmails) {
+              const emailDomain = email.toLowerCase().trim().split("@")[1];
+              if (emailDomain && normalizedWebsite.includes(emailDomain)) {
+                return client;
+              }
+            }
+          }
+        }
+        return null;
+      });
+    
+    if (duplicate) {
+      throw new Error(`A client with matching information already exists: ${duplicate.businessName}`);
+    }
+    
+    // Get or create organization for owner
+    let member = await ctx.db
+      .query("organization_members")
+      .withIndex("by_email", (q) => q.eq("email", args.ownerEmail))
+      .first();
+    
+    let organizationId: Id<"organizations">;
+    if (member) {
+      organizationId = member.organizationId;
+    } else {
+      // Create default organization for user inline
+      const now = Date.now();
+      organizationId = await ctx.db.insert("organizations", {
+        name: `${args.ownerEmail.split("@")[0]}'s Organization`,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("organization_members", {
+        organizationId,
+        email: args.ownerEmail,
+        role: "owner",
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const now = Date.now();
+    const clientId = await ctx.db.insert("clients", {
+      organizationId,
+      ownerEmail: args.ownerEmail,
+      businessEmail: args.businessEmail?.toLowerCase().trim() || undefined,
+      businessName: args.businessName,
+      contactFirstName: args.contactFirstName,
+      contactLastName: args.contactLastName,
+      targetRevenue: args.targetRevenue,
+      status: "active",
+      cronJobEnabled: args.enableCronJobs !== false, // Default to true
+      createdAt: now,
+      updatedAt: now,
+    });
+    
+    // Schedule cron jobs if enabled
+    if (args.enableCronJobs !== false) {
+      const baseTime = args.monthlyStartTime || args.cronJobBaseTime || now;
+      const skipFirstJob = args.skipFirstCronJob === true;
+      ctx.scheduler.runAfter(0, api.cronJobs.scheduleCronJobsForClient, {
+        clientId,
+        ownerEmail: args.ownerEmail,
+        baseTime,
+        skipFirstJob,
+      }).catch((error) => {
+        console.error(`[createManualClient] Failed to schedule cron jobs for client ${clientId}:`, error);
+      });
+    }
+    
+    // Trigger script generation if requested
+    if (args.generateScriptImmediately) {
+      ctx.scheduler.runAfter(0, api.clients.triggerScriptGeneration, {
+        clientId,
+        ownerEmail: args.ownerEmail,
+      }).catch((error) => {
+        console.error(`[createManualClient] Failed to trigger script generation for client ${clientId}:`, error);
+      });
+    }
+    
+    return clientId;
+  },
+});
+
+/**
  * Create or update a client from Typeform response
  */
 export const upsertClientFromTypeform = mutation({
@@ -107,7 +289,34 @@ export const upsertClientFromTypeform = mutation({
       return existing._id;
     }
 
+    // Get or create organization for owner
+    let member = await ctx.db
+      .query("organization_members")
+      .withIndex("by_email", (q) => q.eq("email", args.ownerEmail))
+      .first();
+    
+    let organizationId: Id<"organizations">;
+    if (member) {
+      organizationId = member.organizationId;
+    } else {
+      // Create default organization for user inline
+      const now = Date.now();
+      organizationId = await ctx.db.insert("organizations", {
+        name: `${args.ownerEmail.split("@")[0]}'s Organization`,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("organization_members", {
+        organizationId,
+        email: args.ownerEmail,
+        role: "owner",
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
     const newClientId = await ctx.db.insert("clients", {
+      organizationId,
       ownerEmail: args.ownerEmail,
       businessEmail: args.businessEmail,
       businessName: args.businessName,
@@ -422,6 +631,7 @@ export const updateClient = mutation({
     contactFirstName: v.optional(v.string()),
     contactLastName: v.optional(v.string()),
     targetRevenue: v.optional(v.number()),
+    onboardingResponseId: v.optional(v.string()),
     servicesOffered: v.optional(v.string()),
     status: v.optional(v.union(
       v.literal("active"),
@@ -452,6 +662,7 @@ export const updateClient = mutation({
       contactFirstName?: string;
       contactLastName?: string;
       targetRevenue?: number;
+      onboardingResponseId?: string;
       servicesOffered?: string;
       status?: "active" | "paused" | "inactive";
       notes?: string;
@@ -487,6 +698,9 @@ export const updateClient = mutation({
     if (args.targetRevenue !== undefined) {
       updateData.targetRevenue = args.targetRevenue || undefined;
     }
+    if (args.onboardingResponseId !== undefined) {
+      updateData.onboardingResponseId = args.onboardingResponseId || undefined;
+    }
     if (args.servicesOffered !== undefined) {
       updateData.servicesOffered = args.servicesOffered || undefined;
     }
@@ -514,7 +728,7 @@ export const updateClient = mutation({
         // Schedule cron jobs in the background
         ctx.scheduler.runAfter(0, api.cronJobs.scheduleCronJobsForClient, {
           clientId: args.clientId,
-          ownerEmail: updatedClient.ownerEmail,
+          ownerEmail: updatedClient.ownerEmail || "",
           baseTime: updatedClient.createdAt,
         }).catch((error) => {
           console.error(`[updateClient] Failed to schedule cron jobs for client ${args.clientId}:`, error);
