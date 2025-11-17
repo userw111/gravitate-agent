@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
-import SignOutButton from "@/components/SignOutButton";
 import DashboardClient from "@/components/DashboardClient";
 
 export default async function Dashboard() {
@@ -28,10 +27,6 @@ export default async function Dashboard() {
             <DashboardClient email={user.email} />
         </div>
 
-        {/* Sign Out */}
-        <div className="flex justify-center pt-8 mt-12 border-t border-foreground/10">
-          <SignOutButton />
-        </div>
       </div>
     </div>
   );

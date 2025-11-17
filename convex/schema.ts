@@ -24,26 +24,30 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_email", ["email"]),
   typeform_configs: defineTable({
-    organizationId: v.optional(v.id("organizations")),
-    email: v.string(),
+    organizationId: v.id("organizations"),
+    email: v.optional(v.string()),
     secret: v.optional(v.string()),
     accessToken: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_email", ["email"]),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_email", ["email"]),
   typeform_webhooks: defineTable({
-    organizationId: v.optional(v.id("organizations")),
-    email: v.string(),
+    organizationId: v.id("organizations"),
+    email: v.optional(v.string()),
     payload: v.any(),
     eventType: v.optional(v.string()),
     formId: v.optional(v.string()),
     receivedAt: v.number(),
   })
+    .index("by_organization", ["organizationId"])
+    .index("by_organization_received", ["organizationId", "receivedAt"])
     .index("by_email", ["email"])
     .index("by_email_received", ["email", "receivedAt"]),
   typeform_responses: defineTable({
-    organizationId: v.optional(v.id("organizations")),
-    email: v.string(),
+    organizationId: v.id("organizations"),
+    email: v.optional(v.string()),
     formId: v.string(),
     responseId: v.string(),
     payload: v.any(),
@@ -62,25 +66,34 @@ export default defineSchema({
       fieldRef: v.optional(v.string()),
     }))),
   })
+    .index("by_organization", ["organizationId"])
+    .index("by_organization_form", ["organizationId", "formId"])
+    .index("by_organization_synced", ["organizationId", "syncedAt"])
     .index("by_email", ["email"])
     .index("by_email_form", ["email", "formId"])
     .index("by_email_synced", ["email", "syncedAt"])
     .index("by_response_id", ["responseId"]),
   fireflies_configs: defineTable({
-    email: v.string(),
+    organizationId: v.id("organizations"),
+    email: v.optional(v.string()),
     apiKey: v.optional(v.string()),
     webhookSecret: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_email", ["email"]),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_email", ["email"]),
   fireflies_webhooks: defineTable({
-    email: v.string(),
+    organizationId: v.id("organizations"),
+    email: v.optional(v.string()),
     payload: v.any(),
     eventType: v.optional(v.string()),
     meetingId: v.optional(v.string()),
     transcriptId: v.optional(v.string()),
     receivedAt: v.number(),
   })
+    .index("by_organization", ["organizationId"])
+    .index("by_organization_received", ["organizationId", "receivedAt"])
     .index("by_email", ["email"])
     .index("by_email_received", ["email", "receivedAt"]),
   clients: defineTable({
@@ -286,17 +299,23 @@ export default defineSchema({
     .index("by_organization", ["organizationId"])
     .index("by_email", ["connectedByEmail"]), // Keep for backwards compatibility during migration
   openrouter_configs: defineTable({
-    email: v.string(),
+    organizationId: v.id("organizations"),
+    email: v.optional(v.string()),
     apiKey: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_email", ["email"]),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_email", ["email"]),
   system_prompts: defineTable({
-    email: v.string(),
+    organizationId: v.id("organizations"),
+    email: v.optional(v.string()),
     prompt: v.string(), // The system prompt for script generation
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_email", ["email"]),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_email", ["email"]),
   ad_briefings: defineTable({
     organizationId: v.id("organizations"),
     ownerEmail: v.optional(v.string()), // Deprecated - kept for migration

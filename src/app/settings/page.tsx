@@ -6,6 +6,7 @@ import ScriptSettingsCard from "@/components/ScriptSettingsCard";
 import OpenRouterSettingsCard from "@/components/OpenRouterSettingsCard";
 import ScriptGenerationStatusCard from "@/components/ScriptGenerationStatusCard";
 import GoogleDriveSettingsCard from "@/components/GoogleDriveSettingsCard";
+import OrganizationSettingsCard from "@/components/OrganizationSettingsCard";
 
 export default async function SettingsPage() {
   const user = await getCurrentUser();
@@ -17,6 +18,7 @@ export default async function SettingsPage() {
     <div className="mx-auto max-w-3xl px-4 py-10">
       <h1 className="mb-6 text-2xl font-light tracking-tight">Settings</h1>
       <div className="space-y-6">
+        <OrganizationSettingsCard email={user.email} />
         <OpenRouterSettingsCard email={user.email} />
         <ScriptGenerationStatusCard />
         <ScriptSettingsCard email={user.email} />

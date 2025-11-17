@@ -21,11 +21,12 @@ export const createScript = mutation({
     status: v.optional(v.union(v.literal("draft"), v.literal("final"))),
   },
   handler: async (ctx: MutationCtx, args) => {
+    // Get organizationId from client
     const client = await ctx.db.get(args.clientId);
-    if (!client) {
-      throw new Error(`Client not found: ${args.clientId}`);
+    if (!client || !client.organizationId) {
+      throw new Error("Client not found or missing organization");
     }
-
+    
     const now = Date.now();
     return await ctx.db.insert("scripts", {
       organizationId: client.organizationId,

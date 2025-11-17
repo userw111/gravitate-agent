@@ -306,11 +306,12 @@ export const createCronJobRecord = mutation({
     isRepeating: v.boolean(),
   },
   handler: async (ctx: MutationCtx, args) => {
+    // Get organizationId from client
     const client = await ctx.db.get(args.clientId);
-    if (!client) {
-      throw new Error(`Client not found: ${args.clientId}`);
+    if (!client || !client.organizationId) {
+      throw new Error("Client not found or missing organization");
     }
-
+    
     const now = Date.now();
     const cronJobId = `cron_${args.clientId}_${args.scheduledTime}_${Math.random().toString(36).substring(7)}`;
     

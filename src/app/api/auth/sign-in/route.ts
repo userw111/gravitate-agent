@@ -1,75 +1,21 @@
 import { NextResponse } from "next/server";
+import { WorkOS } from "@workos-inc/node";
 
 const workosApiKey = process.env.WORKOS_API_KEY;
 const workosClientId = process.env.WORKOS_CLIENT_ID;
-const WORKOS_AUTHORIZE_URL = "https://api.workos.com/user_management/authorize";
 
-function normalizeBaseUrl(value?: string | null) {
-  if (!value) {
-    return null;
-  }
+// Normalize the app URL so it always includes a scheme.
+// In Cloudflare, NEXT_PUBLIC_APP_URL is currently set to "gravitate.ultralistic.com"
+// which would produce an invalid redirect_uri without "https://".
+const rawAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+const appUrl =
+  rawAppUrl && rawAppUrl.length > 0
+    ? rawAppUrl.startsWith("http://") || rawAppUrl.startsWith("https://")
+      ? rawAppUrl
+      : `https://${rawAppUrl}`
+    : "http://localhost:3000";
 
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const withProtocol =
-    trimmed.startsWith("http://") || trimmed.startsWith("https://")
-      ? trimmed
-      : `https://${trimmed}`;
-
-  return withProtocol.replace(/\/+$/, "");
-}
-
-function deriveBaseUrlFromRequest(request: Request) {
-  const host =
-    request.headers.get("x-forwarded-host") ??
-    request.headers.get("host") ??
-    null;
-
-  if (!host) {
-    return null;
-  }
-
-  const protoHeader = request.headers.get("x-forwarded-proto");
-  const protoGuess = protoHeader?.split(",")[0]?.trim();
-  const protocol =
-    protoGuess && (protoGuess === "http" || protoGuess === "https")
-      ? protoGuess
-      : host.includes("localhost")
-        ? "http"
-        : "https";
-
-  return `${protocol}://${host}`.replace(/\/+$/, "");
-}
-
-function resolveAppUrl(request: Request) {
-  const normalizedEnvUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_APP_URL);
-  if (normalizedEnvUrl) {
-    return { url: normalizedEnvUrl, source: "env" as const };
-  }
-
-  const derived = deriveBaseUrlFromRequest(request);
-  if (derived) {
-    return { url: derived, source: "headers" as const };
-  }
-
-  return { url: "http://localhost:3000", source: "fallback" as const };
-}
-
-function buildAuthorizationUrl(redirectUri: string, clientId: string) {
-  const url = new URL(WORKOS_AUTHORIZE_URL);
-  url.searchParams.set("client_id", clientId);
-  url.searchParams.set("redirect_uri", redirectUri);
-  url.searchParams.set("provider", "authkit");
-  url.searchParams.set("response_type", "code");
-  return url;
-}
-
-export async function GET(request: Request) {
-  const { url: appUrl, source: appUrlSource } = resolveAppUrl(request);
-
+export async function GET() {
   // Extremely verbose logging to debug "Invalid client ID" issues
   console.log("[AUTH/SIGN-IN] Bootstrapping WorkOS client", {
     hasWorkosApiKey: !!workosApiKey,
@@ -78,7 +24,6 @@ export async function GET(request: Request) {
     hasWorkosClientId: !!workosClientId,
     nodeEnv: process.env.NODE_ENV,
     appUrl,
-    appUrlSource,
     timestamp: new Date().toISOString(),
   });
 
@@ -89,7 +34,6 @@ export async function GET(request: Request) {
     hasWorkosClientId: !!workosClientId,
     hasWorkosApiKey: !!workosApiKey,
     appUrl,
-    appUrlSource,
     envSnapshot: {
       WORKOS_CLIENT_ID: workosClientId,
       HAS_WORKOS_API_KEY: !!workosApiKey,
@@ -121,18 +65,22 @@ export async function GET(request: Request) {
   }
 
   try {
-    const redirectUri = `${appUrl}/api/auth/callback`;
+    const workos = new WorkOS(workosApiKey);
 
-    console.log("[AUTH/SIGN-IN] Building WorkOS authorization URL", {
+    console.log("[AUTH/SIGN-IN] Calling workos.userManagement.getAuthorizationUrl", {
       provider: "authkit",
-      redirectUri,
+      redirectUri: `${appUrl}/api/auth/callback`,
       clientId: workosClientId,
     });
 
-    const authorizationUrl = buildAuthorizationUrl(redirectUri, workosClientId);
+    const authorizationUrl = workos.userManagement.getAuthorizationUrl({
+      provider: "authkit",
+      redirectUri: `${appUrl}/api/auth/callback`,
+      clientId: workosClientId!,
+    });
 
     console.log("[AUTH/SIGN-IN] Received authorization URL from WorkOS", {
-      authorizationUrl: authorizationUrl.toString(),
+      authorizationUrl,
       parsed: (() => {
         try {
           const u = new URL(authorizationUrl);
@@ -149,12 +97,13 @@ export async function GET(request: Request) {
 
     // Force re-authentication to ensure the hosted sign-in screen appears
     const url = new URL(authorizationUrl);
-    url.searchParams.set("prompt", "select_account login");
+    url.searchParams.set("prompt", "login");
     url.searchParams.set("max_age", "0");
+    // Encourage IdP account chooser when supported
+    url.searchParams.set("prompt", "select_account login");
 
     console.log("[AUTH/SIGN-IN] Final redirect URL", {
       redirectTo: url.toString(),
-      redirectUri,
       searchParams: Object.fromEntries(url.searchParams.entries()),
     });
 

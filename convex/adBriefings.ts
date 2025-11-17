@@ -35,18 +35,19 @@ export const upsertBriefing = mutation({
       )
       .unique();
 
-    if (existing) {
-      await ctx.db.patch(existing._id as Id<"ad_briefings">, {
-        briefing: args.briefing,
-        updatedAt: now,
-      });
-      return existing._id;
-    }
-
     // Get organizationId from client
     const client = await ctx.db.get(args.clientId);
     if (!client || !client.organizationId) {
       throw new Error("Client not found or missing organization");
+    }
+
+    if (existing) {
+      await ctx.db.patch(existing._id as Id<"ad_briefings">, {
+        organizationId: client.organizationId, // Ensure organizationId is set
+        briefing: args.briefing,
+        updatedAt: now,
+      });
+      return existing._id;
     }
 
     const id = await ctx.db.insert("ad_briefings", {
@@ -59,6 +60,50 @@ export const upsertBriefing = mutation({
     });
 
     return id;
+  },
+});
+
+/**
+ * Migration: Fix existing ad_briefings records missing organizationId
+ * This should be run once to fix existing records
+ */
+export const migrateAdBriefingsOrganizationId = mutation({
+  args: {},
+  handler: async (ctx: MutationCtx) => {
+    // Get all ad_briefings records
+    const allBriefings = await ctx.db.query("ad_briefings").collect();
+    
+    let fixed = 0;
+    let errors = 0;
+    
+    for (const briefing of allBriefings) {
+      // Skip if already has organizationId
+      if (briefing.organizationId) {
+        continue;
+      }
+      
+      // Get organizationId from client
+      const client = await ctx.db.get(briefing.clientId);
+      if (!client || !client.organizationId) {
+        console.error(`Client not found or missing organization for briefing ${briefing._id}`);
+        errors++;
+        continue;
+      }
+      
+      // Update the briefing with organizationId
+      await ctx.db.patch(briefing._id, {
+        organizationId: client.organizationId,
+        updatedAt: Date.now(),
+      });
+      
+      fixed++;
+    }
+    
+    return {
+      total: allBriefings.length,
+      fixed,
+      errors,
+    };
   },
 });
 

@@ -1,39 +1,97 @@
 import { NextResponse } from "next/server";
-import { ConvexHttpClient } from "convex/browser";
-import { api } from "../../../../../convex/_generated/api";
-import crypto from "crypto";
+import {
+  convexAction,
+  convexMutation,
+  convexQuery,
+} from "@/lib/convexHttp";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
-const convex = convexUrl ? new ConvexHttpClient(convexUrl) : null;
+const hasConvexConfig = Boolean(
+  convexUrl && process.env.CONVEX_DEPLOYMENT_TOKEN
+);
 
-function verifySignature(rawBody: string, signature: string | null, secret: string): boolean {
+// Web Crypto API compatible HMAC function for Cloudflare Workers
+async function computeHMAC(message: string, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode(secret);
+  const messageData = encoder.encode(message);
+  
+  // Import the key for HMAC
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    keyData,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  
+  // Sign the message
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, messageData);
+  
+  // Convert to hex string
+  const hashArray = Array.from(new Uint8Array(signature));
+  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Constant-time comparison for security
+function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a[i] ^ b[i];
+  }
+  return result === 0;
+}
+
+// Hex string to Uint8Array
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return bytes;
+}
+
+// Base64 string to Uint8Array
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function verifySignature(rawBody: string, signature: string | null, secret: string): Promise<boolean> {
   if (!signature) return false;
   
-  // Compute HMAC SHA256 using the secret and raw body
-  const hmac = crypto.createHmac("sha256", secret);
-  hmac.update(rawBody);
-  const expectedSignatureHex = hmac.digest("hex");
-  
-  // Some services send signatures with "sha256=" prefix, strip it if present
-  const cleanSignature = signature.replace(/^sha256=/, "").trim();
-  
-  // Compare signatures using constant-time comparison to prevent timing attacks
   try {
+    // Compute expected signature
+    const expectedSignatureHex = await computeHMAC(rawBody, secret);
+    
+    // Some services send signatures with "sha256=" prefix, strip it if present
+    const cleanSignature = signature.replace(/^sha256=/, "").trim();
+    
+    // Compare signatures using constant-time comparison to prevent timing attacks
     // Try direct hex comparison first (most common)
     if (cleanSignature.length === expectedSignatureHex.length) {
-      return crypto.timingSafeEqual(
-        Buffer.from(cleanSignature, "hex"),
-        Buffer.from(expectedSignatureHex, "hex")
-      );
+      const receivedBytes = hexToBytes(cleanSignature);
+      const expectedBytes = hexToBytes(expectedSignatureHex);
+      return timingSafeEqual(receivedBytes, expectedBytes);
     }
+    
     // If lengths don't match, try as base64
-    const expectedSignatureBase64 = Buffer.from(expectedSignatureHex, "hex").toString("base64");
+    const expectedSignatureBase64 = btoa(
+      String.fromCharCode(...hexToBytes(expectedSignatureHex))
+    );
     if (cleanSignature.length === expectedSignatureBase64.length) {
-      return crypto.timingSafeEqual(
-        Buffer.from(cleanSignature, "base64"),
-        Buffer.from(expectedSignatureBase64, "base64")
-      );
+      const receivedBytes = base64ToBytes(cleanSignature);
+      const expectedBytes = base64ToBytes(expectedSignatureBase64);
+      return timingSafeEqual(receivedBytes, expectedBytes);
     }
+    
     // If lengths don't match either format, signature is invalid
     return false;
   } catch {
@@ -42,10 +100,30 @@ function verifySignature(rawBody: string, signature: string | null, secret: stri
   }
 }
 
+// Health check endpoint
+export async function GET(request: Request) {
+  return NextResponse.json({
+    status: "ok",
+    route: "/api/fireflies/webhook",
+    convexConfigured: hasConvexConfig,
+    convexUrl: convexUrl ? `${convexUrl.substring(0, 30)}...` : "not set",
+    timestamp: new Date().toISOString(),
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const url = new URL(request.url);
     const userEmail = url.searchParams.get("user");
+    
+    // Log request details for debugging
+    console.log("[Fireflies Webhook] POST request received", {
+      url: request.url,
+      hasUserEmail: !!userEmail,
+      convexConfigured: hasConvexConfig,
+      convexUrlSet: !!convexUrl,
+    });
+
     if (!userEmail) {
       return NextResponse.json(
         { error: "Missing user parameter in query string" },
@@ -53,8 +131,8 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!convex) {
-      console.error("Convex client not initialized: NEXT_PUBLIC_CONVEX_URL is missing");
+    if (!hasConvexConfig) {
+      console.error("[Fireflies Webhook] Convex HTTP API not configured");
       return NextResponse.json(
         { error: "Server configuration error: Convex not configured" },
         { status: 500 }
@@ -74,7 +152,9 @@ export async function POST(request: Request) {
     // Get user's webhook secret
     let config;
     try {
-      config = await convex.query(api.fireflies.getConfigForEmail, { email: userEmail });
+      config = await convexQuery<any>("fireflies:getConfigForEmail", {
+        email: userEmail,
+      });
     } catch (error) {
       console.error(`Failed to fetch config for user ${userEmail}:`, error);
       return NextResponse.json(
@@ -113,18 +193,16 @@ export async function POST(request: Request) {
         );
       }
 
-      const isValid = verifySignature(rawBody, signature, config.webhookSecret);
+      const isValid = await verifySignature(rawBody, signature, config.webhookSecret);
       console.log("Signature verification result:", isValid);
       
       if (!isValid) {
         // Try computing expected signature for debugging
-        const hmac = crypto.createHmac("sha256", config.webhookSecret);
-        hmac.update(rawBody);
-        const expectedHex = hmac.digest("hex");
+        const expectedHex = await computeHMAC(rawBody, config.webhookSecret);
         console.error(`Signature verification failed for user ${userEmail}`);
         console.error("Expected signature (hex):", expectedHex);
         console.error("Received signature:", signature);
-        console.error("Signature length - expected:", expectedHex.length, "received:", signature.length);
+        console.error("Signature length - expected:", expectedHex.length, "received:", signature?.length || 0);
         
         return NextResponse.json(
           { error: "Invalid webhook signature. Signature verification failed." },
@@ -169,7 +247,7 @@ export async function POST(request: Request) {
 
     // Store webhook notification first (without transcript data)
     try {
-      await convex.mutation(api.fireflies.storeWebhook, {
+      await convexMutation<any>("fireflies:storeWebhook", {
         email: userEmail,
         payload,
         eventType,
@@ -188,7 +266,7 @@ export async function POST(request: Request) {
     // This happens asynchronously - we return success immediately and fetch in background
     if (eventType === "Transcription completed" || eventType === "transcription.completed") {
       // Fetch and store transcript (this handles auto-linking via participant emails)
-      convex.action(api.firefliesActions.fetchAndStoreTranscriptById, {
+      convexAction<any>("firefliesActions:fetchAndStoreTranscriptById", {
         email: userEmail,
         meetingId: meetingId,
       })
@@ -225,9 +303,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));
-    console.error("Fireflies webhook processing error:", error);
+    console.error("[Fireflies Webhook] Processing error:", {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      url: request.url,
+    });
     return NextResponse.json(
-      { error: `Webhook processing failed: ${error.message}` },
+      { 
+        error: `Webhook processing failed: ${error.message}`,
+        details: process.env.NODE_ENV === "development" ? error.stack : undefined,
+      },
       { status: 500 }
     );
   }

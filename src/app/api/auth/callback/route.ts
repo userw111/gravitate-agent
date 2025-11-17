@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import { WorkOS } from "@workos-inc/node";
 import { cookies } from "next/headers";
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "../../../../../convex/_generated/api";
 
 const workosApiKey = process.env.WORKOS_API_KEY;
 const workosClientId = process.env.WORKOS_CLIENT_ID;
-const WORKOS_AUTHENTICATE_URL =
-  "https://api.workos.com/user_management/authenticate";
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+const convex = convexUrl ? new ConvexHttpClient(convexUrl) : null;
 
 // Normalize the app URL so it always includes a scheme.
 // Cloudflare currently sets NEXT_PUBLIC_APP_URL to "gravitate.ultralistic.com",
@@ -16,70 +19,6 @@ const appUrl =
       ? rawAppUrl
       : `https://${rawAppUrl}`
     : "http://localhost:3000";
-
-type WorkOSSessionLike = {
-  id?: string;
-  access_token?: string;
-  accessToken?: string;
-  [key: string]: unknown;
-};
-
-type WorkOSAuthenticationPayload = {
-  user_session?: WorkOSSessionLike | null;
-  userSession?: WorkOSSessionLike | null;
-  session?: WorkOSSessionLike | null;
-  access_token?: string;
-  accessToken?: string;
-  [key: string]: unknown;
-};
-
-type WorkOSAuthResponse = {
-  user: {
-    id: string;
-    email: string;
-    session?: WorkOSSessionLike | null;
-    sessionId?: string | null;
-    [key: string]: unknown;
-  };
-  authentication?: WorkOSAuthenticationPayload | null;
-  accessToken?: string;
-  session?: WorkOSSessionLike | null;
-  sessionId?: string | null;
-  userSession?: WorkOSSessionLike | null;
-  [key: string]: unknown;
-};
-
-async function authenticateWithCode(
-  code: string,
-  redirectUri: string,
-) {
-  if (!workosApiKey || !workosClientId) {
-    throw new Error("WorkOS credentials are not configured");
-  }
-
-  const response = await fetch(WORKOS_AUTHENTICATE_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      client_id: workosClientId,
-      client_secret: workosApiKey,
-      code,
-      grant_type: "authorization_code",
-      redirect_uri: redirectUri,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `[WorkOS] Failed to authenticate with code. Status ${response.status}: ${errorText}`,
-    );
-  }
-
-  return (await response.json()) as WorkOSAuthResponse;
-}
 
 export async function GET(request: Request) {
   console.log("[AUTH/CALLBACK] Bootstrapping WorkOS client", {
@@ -136,15 +75,17 @@ export async function GET(request: Request) {
   }
 
   try {
-    const redirectUri = `${appUrl}/api/auth/callback`;
+    const workos = new WorkOS(workosApiKey);
 
-    console.log("[AUTH/CALLBACK] Calling WorkOS authenticate endpoint via fetch", {
+    console.log("[AUTH/CALLBACK] Calling workos.userManagement.authenticateWithCode", {
       codeSnippet: code.substring(0, 10) + "...",
       workosClientId,
-      redirectUri,
     });
 
-    const auth = await authenticateWithCode(code, redirectUri);
+    const auth: any = await workos.userManagement.authenticateWithCode({
+      code,
+      clientId: workosClientId!,
+    });
 
     console.log("[AUTH/CALLBACK] WorkOS authenticateWithCode response (truncated)", {
       topLevelKeys: Object.keys(auth || {}),
@@ -180,8 +121,18 @@ export async function GET(request: Request) {
 
     console.log("[AUTH/CALLBACK] workos_user_id and workos_user_email cookies set");
 
-    // Organization creation is now handled in the dashboard load sequence.
-    // This edge route intentionally avoids Convex client calls to stay compatible with Cloudflare Workers.
+    // Create/ensure user has an organization
+    if (convex) {
+      try {
+        await convex.mutation(api.organizations.getOrCreateDefaultOrganization, {
+          email: user.email,
+        });
+        console.log("[AUTH/CALLBACK] Organization ensured for user");
+      } catch (orgError) {
+        console.error("[AUTH/CALLBACK] Failed to create organization:", orgError);
+        // Don't fail auth if org creation fails - user can still proceed
+      }
+    }
 
     // Capture WorkOS user session ID for federated logout if present in response.
     // Try multiple known shapes to be robust across SDK versions.

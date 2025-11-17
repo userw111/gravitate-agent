@@ -7,7 +7,6 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Card } from "./ui/card";
-import { Textarea } from "./ui/textarea";
 import { Plus, Trash2, Loader2, Calendar } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -38,8 +37,6 @@ export default function ImportClient({ email }: ImportClientProps) {
   const [isImporting, setIsImporting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [successCount, setSuccessCount] = React.useState<number | null>(null);
-  const [csvInput, setCsvInput] = React.useState("");
-  const [csvError, setCsvError] = React.useState<string | null>(null);
 
   const addRow = () => {
     setRows([
@@ -152,89 +149,6 @@ export default function ImportClient({ email }: ImportClientProps) {
     }
   };
 
-  const handleCsvConvert = () => {
-    setCsvError(null);
-    if (!csvInput.trim()) {
-      setCsvError("Add at least one line in the CSV field before converting.");
-      return;
-    }
-
-    const lines = csvInput
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    if (lines.length === 0) {
-      setCsvError("Add at least one line in the CSV field before converting.");
-      return;
-    }
-
-    const newRows: ImportRow[] = [];
-
-    for (const [index, line] of lines.entries()) {
-      const parts = line.split(",").map((part) => part.trim());
-      if (parts.length < 3) {
-        setCsvError(`Line ${index + 1} must follow "First Name, Business Name, MM/DD" format.`);
-        return;
-      }
-
-      const [firstName, businessName, datePart] = parts;
-
-      if (!businessName) {
-        setCsvError(`Line ${index + 1}: Business name is required.`);
-        return;
-      }
-
-      const dateMatch = datePart.match(/^(\d{1,2})\/(\d{1,2})$/);
-      if (!dateMatch) {
-        setCsvError(`Line ${index + 1}: Date must use MM/DD format (e.g., 03/15).`);
-        return;
-      }
-
-      const month = Number.parseInt(dateMatch[1], 10);
-      const day = Number.parseInt(dateMatch[2], 10);
-
-      if (month < 1 || month > 12 || day < 1 || day > 31) {
-        setCsvError(`Line ${index + 1}: Date ${datePart} is not valid.`);
-        return;
-      }
-
-      const startDate = `2025-${month.toString().padStart(2, "0")}-${day
-        .toString()
-        .padStart(2, "0")}`;
-
-      newRows.push({
-        id: crypto.randomUUID(),
-        businessName,
-        contactFirstName: firstName,
-        contactLastName: "",
-        startDate,
-      });
-    }
-
-    setRows((prev) => {
-      const existingRows = prev.filter((row) =>
-        [row.businessName, row.contactFirstName, row.contactLastName, row.startDate].some(
-          (value) => value.trim() !== ""
-        )
-      );
-      const combined = [...existingRows, ...newRows];
-      return combined.length > 0
-        ? combined
-        : [
-            {
-              id: crypto.randomUUID(),
-              businessName: "",
-              contactFirstName: "",
-              contactLastName: "",
-              startDate: "",
-            },
-          ];
-    });
-
-    setCsvInput("");
-  };
-
   return (
     <div className="min-h-screen px-4 py-12 bg-background">
       <div className="mx-auto max-w-6xl">
@@ -251,36 +165,6 @@ export default function ImportClient({ email }: ImportClientProps) {
         {/* Import Form */}
         <Card className="bg-linear-to-br from-background to-background/95 border-foreground/10 shadow-md">
           <div className="p-6 space-y-6">
-            {/* CSV Import */}
-            <div className="space-y-3 rounded-lg border border-foreground/10 bg-background/40 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <Label className="text-sm font-medium">Import via CSV</Label>
-                  <p className="text-xs text-foreground/60">
-                    One client per line using: <span className="font-mono">First Name, Business Name, MM/DD</span>. Dates are assumed to be in 2025.
-                  </p>
-                </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleCsvConvert}
-                  disabled={isImporting}
-                >
-                  Convert to Rows
-                </Button>
-              </div>
-              <Textarea
-                value={csvInput}
-                onChange={(event) => setCsvInput(event.target.value)}
-                placeholder="Jane, Acme Roofing, 03/15"
-                rows={4}
-                disabled={isImporting}
-              />
-              {csvError && (
-                <p className="text-xs text-red-500">{csvError}</p>
-              )}
-            </div>
-
             {/* Table Header */}
             <div className="grid grid-cols-12 gap-4 pb-2 border-b border-foreground/10">
               <div className="col-span-3">
@@ -436,7 +320,6 @@ export default function ImportClient({ email }: ImportClientProps) {
               <li>Cron jobs follow the standard pattern: 25 days after start date, then 30 days after that (55 days total), then monthly</li>
               <li>All start dates must be in the past</li>
               <li>Only rows with business name and start date will be imported</li>
-              <li>You can paste CSV data (First Name, Business Name, MM/DD) to add multiple rows quickly</li>
             </ul>
           </div>
         </Card>

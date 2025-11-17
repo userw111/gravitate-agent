@@ -3,9 +3,13 @@
 import * as React from "react";
 import Link from "next/link";
 
+type DropdownMenuItem =
+  | { label: string; href: string; onClick?: never; danger?: boolean }
+  | { label: string; onClick: () => void; href?: never; danger?: boolean };
+
 type DropdownMenuProps = {
   trigger: React.ReactNode;
-  items: Array<{ label: string; href: string }>;
+  items: DropdownMenuItem[];
 };
 
 export function DropdownMenu({ trigger, items }: DropdownMenuProps) {
@@ -73,14 +77,31 @@ export function DropdownMenu({ trigger, items }: DropdownMenuProps) {
       >
         <ul className="py-1">
           {items.map((item) => (
-            <li key={item.href}>
-              <Link
-                href={item.href}
-                className="block px-3 py-2 text-sm text-foreground/90 hover:bg-foreground/5"
-                onClick={() => setOpen(false)}
-              >
-                {item.label}
-              </Link>
+            <li key={item.href ?? item.label}>
+              {item.href ? (
+                <Link
+                  href={item.href}
+                  className="block px-3 py-2 text-sm text-foreground/90 hover:bg-foreground/5"
+                  onClick={() => setOpen(false)}
+                >
+                  {item.label}
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    item.onClick?.();
+                    setOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 text-sm ${
+                    item.danger
+                      ? "text-red-600 hover:bg-red-500/10"
+                      : "text-foreground/90 hover:bg-foreground/5"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              )}
             </li>
           ))}
         </ul>

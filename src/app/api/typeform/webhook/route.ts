@@ -1,67 +1,97 @@
 import { NextResponse } from "next/server";
-import { ConvexHttpClient } from "convex/browser";
-import { api } from "../../../../../convex/_generated/api";
-import crypto from "crypto";
-
-type TypeformAnswer = {
-  field?: {
-    id?: string;
-    ref?: string;
-    type?: string;
-  };
-  text?: string;
-  email?: string;
-  type?: string;
-};
-
-type TypeformFormResponse = {
-  form_id?: string;
-  token?: string;
-  response_id?: string;
-  answers?: TypeformAnswer[];
-  hidden?: Record<string, string>;
-  submitted_at?: string;
-  landed_at?: string;
-};
-
-type TypeformWebhookPayload = {
-  event_id?: string;
-  event_type?: string;
-  form_response?: TypeformFormResponse;
-  form_id?: string;
-};
+import {
+  convexAction,
+  convexMutation,
+  convexQuery,
+} from "@/lib/convexHttp";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
-const convex = convexUrl ? new ConvexHttpClient(convexUrl) : null;
+const hasConvexConfig = Boolean(
+  convexUrl && process.env.CONVEX_DEPLOYMENT_TOKEN
+);
 
-function verifySignature(rawBody: string, signature: string | null, secret: string): boolean {
+// Web Crypto API compatible HMAC function for Cloudflare Workers
+async function computeHMAC(message: string, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode(secret);
+  const messageData = encoder.encode(message);
+  
+  // Import the key for HMAC
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    keyData,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  
+  // Sign the message
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, messageData);
+  
+  // Convert to hex string
+  const hashArray = Array.from(new Uint8Array(signature));
+  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Constant-time comparison for security
+function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a[i] ^ b[i];
+  }
+  return result === 0;
+}
+
+// Hex string to Uint8Array
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return bytes;
+}
+
+// Base64 string to Uint8Array
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function verifySignature(rawBody: string, signature: string | null, secret: string): Promise<boolean> {
   if (!signature) return false;
   
-  // Compute HMAC SHA256 using the secret and raw body
-  const hmac = crypto.createHmac("sha256", secret);
-  hmac.update(rawBody);
-  const expectedSignatureHex = hmac.digest("hex");
-  
-  // Some services send signatures with "sha256=" prefix, strip it if present
-  const cleanSignature = signature.replace(/^sha256=/, "").trim();
-  
-  // Compare signatures using constant-time comparison to prevent timing attacks
   try {
+    // Compute expected signature
+    const expectedSignatureHex = await computeHMAC(rawBody, secret);
+    
+    // Some services send signatures with "sha256=" prefix, strip it if present
+    const cleanSignature = signature.replace(/^sha256=/, "").trim();
+    
+    // Compare signatures using constant-time comparison to prevent timing attacks
     // Try direct hex comparison first (most common)
     if (cleanSignature.length === expectedSignatureHex.length) {
-      return crypto.timingSafeEqual(
-        Buffer.from(cleanSignature, "hex"),
-        Buffer.from(expectedSignatureHex, "hex")
-      );
+      const receivedBytes = hexToBytes(cleanSignature);
+      const expectedBytes = hexToBytes(expectedSignatureHex);
+      return timingSafeEqual(receivedBytes, expectedBytes);
     }
+    
     // If lengths don't match, try as base64
-    const expectedSignatureBase64 = Buffer.from(expectedSignatureHex, "hex").toString("base64");
+    const expectedSignatureBase64 = btoa(
+      String.fromCharCode(...hexToBytes(expectedSignatureHex))
+    );
     if (cleanSignature.length === expectedSignatureBase64.length) {
-      return crypto.timingSafeEqual(
-        Buffer.from(cleanSignature, "base64"),
-        Buffer.from(expectedSignatureBase64, "base64")
-      );
+      const receivedBytes = base64ToBytes(cleanSignature);
+      const expectedBytes = base64ToBytes(expectedSignatureBase64);
+      return timingSafeEqual(receivedBytes, expectedBytes);
     }
+    
     // If lengths don't match either format, signature is invalid
     return false;
   } catch {
@@ -70,10 +100,30 @@ function verifySignature(rawBody: string, signature: string | null, secret: stri
   }
 }
 
+// Health check endpoint
+export async function GET(request: Request) {
+  return NextResponse.json({
+    status: "ok",
+    route: "/api/typeform/webhook",
+    convexConfigured: hasConvexConfig,
+    convexUrl: convexUrl ? `${convexUrl.substring(0, 30)}...` : "not set",
+    timestamp: new Date().toISOString(),
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const url = new URL(request.url);
     const userEmail = url.searchParams.get("user");
+    
+    // Log request details for debugging
+    console.log("[Typeform Webhook] POST request received", {
+      url: request.url,
+      hasUserEmail: !!userEmail,
+      convexConfigured: hasConvexConfig,
+      convexUrlSet: !!convexUrl,
+    });
+
     if (!userEmail) {
       return NextResponse.json(
         { error: "Missing user parameter in query string" },
@@ -81,8 +131,8 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!convex) {
-      console.error("Convex client not initialized: NEXT_PUBLIC_CONVEX_URL is missing");
+    if (!hasConvexConfig) {
+      console.error("[Typeform Webhook] Convex HTTP API not configured");
       return NextResponse.json(
         { error: "Server configuration error: Convex not configured" },
         { status: 500 }
@@ -103,7 +153,9 @@ export async function POST(request: Request) {
     // Get user's webhook secret
     let config;
     try {
-      config = await convex.query(api.typeform.getConfigForEmail, { email: userEmail });
+      config = await convexQuery<any>("typeform:getConfigForEmail", {
+        email: userEmail,
+      });
     } catch (error) {
       console.error(`Failed to fetch config for user ${userEmail}:`, error);
       return NextResponse.json(
@@ -132,7 +184,8 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!verifySignature(rawBody, signature, config.secret)) {
+    const isValid = await verifySignature(rawBody, signature, config.secret);
+    if (!isValid) {
       console.warn(`Signature verification failed for user ${userEmail}`);
       return NextResponse.json(
         { error: "Invalid webhook signature. Signature verification failed." },
@@ -141,9 +194,9 @@ export async function POST(request: Request) {
     }
 
     // Parse JSON payload
-    let payload: TypeformWebhookPayload;
+    let payload: unknown;
     try {
-      payload = JSON.parse(rawBody) as TypeformWebhookPayload;
+      payload = JSON.parse(rawBody);
     } catch (parseError) {
       console.error("Failed to parse webhook payload as JSON:", parseError);
       return NextResponse.json(
@@ -153,13 +206,17 @@ export async function POST(request: Request) {
     }
 
     // Extract event type and form ID from payload
-    const payloadObj = payload;
-    const eventType = payloadObj.event_id ?? payloadObj.event_type ?? undefined;
-    const formId = payloadObj.form_response?.form_id ?? payloadObj.form_id;
+    const payloadObj = payload as Record<string, unknown>;
+    const eventType = typeof payloadObj.event_id === "string" ? payloadObj.event_id : 
+                      typeof payloadObj.event_type === "string" ? payloadObj.event_type : 
+                      undefined;
+    const formId = typeof payloadObj.form_response === "object" && payloadObj.form_response !== null
+      ? (payloadObj.form_response as Record<string, unknown>).form_id as string | undefined
+      : typeof payloadObj.form_id === "string" ? payloadObj.form_id : undefined;
 
     // Store webhook in Convex
     try {
-      await convex.mutation(api.typeform.storeWebhook, {
+      await convexMutation("typeform:storeWebhook", {
         email: userEmail,
         payload,
         eventType,
@@ -167,7 +224,7 @@ export async function POST(request: Request) {
       });
       
       // If this is a form response webhook, also store the response and create/update client
-      const formResponse = payloadObj.form_response;
+      const formResponse = payloadObj.form_response as Record<string, unknown> | undefined;
       
       if (formResponse && formId) {
         const responseId = typeof formResponse.token === "string" 
@@ -177,14 +234,14 @@ export async function POST(request: Request) {
           : undefined;
         
         if (responseId) {
-          const formAnswers: TypeformAnswer[] = Array.isArray(formResponse.answers)
-            ? formResponse.answers
-            : [];
           // Store response if not already stored
           try {
-            const existingResponse = await convex.query(api.typeform.getResponseByResponseId, {
-              responseId,
-            });
+            const existingResponse = await convexQuery<any>(
+              "typeform:getResponseByResponseId",
+              {
+                responseId,
+              }
+            );
             
             if (!existingResponse) {
               // Fetch form details to get questions
@@ -192,10 +249,13 @@ export async function POST(request: Request) {
               let qaPairs: Array<{ question: string; answer: string; fieldRef?: string }> = [];
               
               try {
-                const formDetails = await convex.action(api.typeformActions.fetchTypeformFormDetails, {
-                  email: userEmail,
-                  formId: formId!,
-                });
+                const formDetails = await convexAction<any>(
+                  "typeformActions:fetchTypeformFormDetails",
+                  {
+                    email: userEmail,
+                    formId: formId!,
+                  }
+                );
                 
                 if (formDetails?.fields) {
                   formQuestions = formDetails.fields;
@@ -207,24 +267,23 @@ export async function POST(request: Request) {
                   });
                   
                   // Create Q&A pairs
-                  qaPairs = formAnswers.length > 0
-                    ? formAnswers.map((answer) => {
-                        const ref = answer.field?.ref;
-                        const field = ref ? fieldMap.get(ref) : null;
-                        return {
-                          question: field?.title || ref || "Unknown Question",
-                          answer: answer.text || "",
-                          fieldRef: ref,
-                        };
-                      })
-                    : [];
+                  const answers = formResponse.answers as Array<{ field?: { id?: string; ref?: string }; text?: string }> | undefined;
+                  qaPairs = answers?.map((answer) => {
+                    const ref = answer.field?.ref;
+                    const field = ref ? fieldMap.get(ref) : null;
+                    return {
+                      question: field?.title || ref || "Unknown Question",
+                      answer: answer.text || "",
+                      fieldRef: ref,
+                    };
+                  }) || [];
                 }
               } catch (error) {
                 console.error(`Failed to fetch form details for webhook:`, error);
                 // Continue without questions
               }
               
-              await convex.mutation(api.typeform.storeResponse, {
+              await convexMutation<any>("typeform:storeResponse", {
                 email: userEmail,
                 formId,
                 responseId,
@@ -317,36 +376,38 @@ export async function POST(request: Request) {
               // First check for duplicates (manual clients or existing clients)
               if (businessName) {
                 try {
-                  // Extract website from hidden fields or answers if available
-                  const hiddenFields = (formResponse.hidden ?? {}) as Record<string, unknown>;
-                  const hiddenWebsite = typeof hiddenFields.website === "string" ? hiddenFields.website : undefined;
-                  const websiteAnswer = formAnswers.find((answer) => {
-                    const ref = answer.field?.ref?.toLowerCase() ?? "";
-                    const text = answer.text?.trim();
-                    return ref.includes("website") || ref.includes("url") || (text ? /^https?:\/\//i.test(text) : false);
-                  });
-                  const website = (hiddenWebsite ?? websiteAnswer?.text)?.trim() || undefined;
+                  // Extract website from formResponse if available
+                  const answers = formResponse.answers as Array<{ field?: { id?: string; ref?: string }; text?: string }> | undefined;
+                  const website = answers?.find((a) => 
+                    a.field?.ref?.toLowerCase().includes("website") || 
+                    a.field?.ref?.toLowerCase().includes("url") ||
+                    a.text?.match(/^https?:\/\//)
+                  )?.text || undefined;
                   
                   // Check for duplicate client before creating
-                  const duplicate = await convex.query(api.clients.findDuplicateClient, {
-                    ownerEmail: userEmail,
-                    businessEmail: businessEmail ? businessEmail.toLowerCase().trim() : undefined,
-                    businessName: businessName,
-                    website: website || undefined,
-                  });
+                  const duplicate = await convexQuery<any>(
+                    "clients:findDuplicateClient",
+                    {
+                      ownerEmail: userEmail,
+                      businessEmail: businessEmail
+                        ? businessEmail.toLowerCase().trim()
+                        : undefined,
+                      businessName: businessName,
+                      website: website || undefined,
+                    }
+                  );
                   
                   if (duplicate) {
                     // Link the response to the existing client instead of creating a new one
                     console.log(`[Webhook] Duplicate client found: ${duplicate.businessName}, linking response ${responseId}`);
-                    await convex.mutation(api.clients.linkResponseToClient, {
+                    await convexMutation<any>("clients:linkResponseToClient", {
                       clientId: duplicate._id,
                       responseId: responseId,
                     });
                     // Update client with response data if it's a manual client (no onboardingResponseId)
                     if (!duplicate.onboardingResponseId) {
-                      await convex.mutation(api.clients.updateClient, {
+                      await convexMutation<any>("clients:updateClient", {
                         clientId: duplicate._id,
-                        onboardingResponseId: responseId,
                         contactFirstName: firstName || undefined,
                         contactLastName: lastName || undefined,
                         targetRevenue: targetRevenue || undefined,
@@ -369,15 +430,20 @@ export async function POST(request: Request) {
                     }
                   } else {
                     // No duplicate found, create new client
-                    await convex.mutation(api.clients.upsertClientFromTypeform, {
-                      ownerEmail: userEmail,
-                      businessEmail: businessEmail ? businessEmail.toLowerCase().trim() : undefined,
-                      businessName: businessName,
-                      contactFirstName: firstName || undefined,
-                      contactLastName: lastName || undefined,
-                      onboardingResponseId: responseId,
-                      targetRevenue: targetRevenue || undefined,
-                    });
+                    await convexMutation<any>(
+                      "clients:upsertClientFromTypeform",
+                      {
+                        ownerEmail: userEmail,
+                        businessEmail: businessEmail
+                          ? businessEmail.toLowerCase().trim()
+                          : undefined,
+                        businessName: businessName,
+                        contactFirstName: firstName || undefined,
+                        contactLastName: lastName || undefined,
+                        onboardingResponseId: responseId,
+                        targetRevenue: targetRevenue || undefined,
+                      }
+                    );
                     
                     // Trigger script generation via Cloudflare Workflow (or fallback to direct)
                     // This happens in the background so webhook responds quickly
@@ -423,9 +489,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));
-    console.error("Typeform webhook processing error:", error);
+    console.error("[Typeform Webhook] Processing error:", {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      url: request.url,
+    });
     return NextResponse.json(
-      { error: `Webhook processing failed: ${error.message}` },
+      { 
+        error: `Webhook processing failed: ${error.message}`,
+        details: process.env.NODE_ENV === "development" ? error.stack : undefined,
+      },
       { status: 500 }
     );
   }

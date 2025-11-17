@@ -1,6 +1,7 @@
 import { action, ActionCtx, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { api } from "./_generated/api";
+import { getOrCreateOrganizationIdForEmail } from "./utils/organizations";
 
 export const fetchTypeformForms = action({
   args: {
@@ -289,7 +290,9 @@ export const storeResponseInternal = internalMutation({
     }
     
     // No duplicate found, insert new response
+    const organizationId = await getOrCreateOrganizationIdForEmail(ctx, args.email);
     const id = await ctx.db.insert("typeform_responses", {
+      organizationId,
       email: args.email,
       formId: args.formId,
       responseId: args.responseId,

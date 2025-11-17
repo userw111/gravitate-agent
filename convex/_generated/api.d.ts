@@ -24,6 +24,7 @@ import type * as systemPrompts from "../systemPrompts.js";
 import type * as typeform from "../typeform.js";
 import type * as typeformActions from "../typeformActions.js";
 import type * as users from "../users.js";
+import type * as utils_organizations from "../utils/organizations.js";
 
 import type {
   ApiFromModules,
@@ -56,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   typeform: typeof typeform;
   typeformActions: typeof typeformActions;
   users: typeof users;
+  "utils/organizations": typeof utils_organizations;
 }>;
 declare const fullApiWithMounts: typeof fullApi;
 
