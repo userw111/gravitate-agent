@@ -6,6 +6,16 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // Ensure API routes use Node.js runtime (not edge runtime)
+  // This prevents "No such module 'node:https'" errors from Node.js-only packages
+  experimental: {
+    serverComponentsExternalPackages: [
+      '@workos-inc/node',
+      'posthog-node',
+      '@sentry/node',
+      'convex',
+    ],
+  },
   // Suppress request logging in dev mode
   ...(process.env.NODE_ENV === "development" && {
     onDemandEntries: {
